@@ -237,3 +237,27 @@ def test_authentication_rejects_non_object_json(response_body):
         ),
     ):
         paypal.get_access_token()
+
+
+def test_boolean_expires_in_uses_default_expiry(monkeypatch):
+    import backend.paypal_client as paypal_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(
+        paypal_module,
+        "monotonic",
+        lambda: clock["now"],
+    )
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={"access_token": "synthetic-token", "expires_in": True},
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http,
+        PayPalClient(settings=make_settings(), http_client=http) as paypal,
+    ):
+        assert paypal.get_access_token() == "synthetic-token"
+        assert paypal._token_expires_at == 1240.0

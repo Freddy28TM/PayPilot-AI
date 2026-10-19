@@ -92,7 +92,11 @@ class PayPalClient:
         if not isinstance(token, str) or not token:
             raise RuntimeError("PayPal did not return an access token.")
 
-        if not isinstance(expires_in, (int, float)) or expires_in <= 0:
+        if (
+            isinstance(expires_in, bool)
+            or not isinstance(expires_in, (int, float))
+            or expires_in <= 0
+        ):
             expires_in = 300
 
         self._access_token = token
