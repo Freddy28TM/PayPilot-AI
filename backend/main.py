@@ -58,7 +58,13 @@ def get_gemini_explainer(request: Request) -> GeminiExplainer:
 def get_investigation_repository() -> InvestigationRepository:
     """Create and initialize the local investigation repository."""
     repository = InvestigationRepository()
-    repository.initialize()
+    try:
+        repository.initialize()
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Investigation history is temporarily unavailable.",
+        ) from exc
     return repository
 
 

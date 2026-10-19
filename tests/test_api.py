@@ -340,6 +340,41 @@ def test_investigation_history_endpoint_handles_database_failure(api_client):
     assert "private database detail" not in response.text
 
 
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/investigations",
+        "/api/paypal/orders/TEST-ORDER/investigation",
+    ],
+)
+@pytest.mark.parametrize(
+    "failure_type",
+    [sqlite3.OperationalError, OSError],
+)
+def test_repository_initialization_failure_returns_safe_503(
+    api_client, monkeypatch, path, failure_type
+):
+    client, _ = api_client
+
+    def fail_initialize(self):
+        raise failure_type("private initialization detail")
+
+    monkeypatch.setattr(
+        InvestigationRepository, "initialize", fail_initialize
+    )
+    app.dependency_overrides.pop(get_investigation_repository, None)
+
+    response = client.get(path)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Investigation history is temporarily unavailable."
+    )
+    assert "private initialization detail" not in response.text
+
+
 @pytest.mark.parametrize(
     "path",
     [
