@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101c2d">
+  <title>PayPilot AI — Payment Operations</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17243a;
+      --muted: #64748b;
+      --line: #e1e7ef;
+      --surface: #ffffff;
+      --canvas: #f4f7fb;
+      --navy: #101c2d;
+      --blue: #2859d6;
+      --blue-soft: #edf3ff;
+      --green: #18794e;
+      --amber: #946200;
+      --red: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font: 15px/1.6 system-ui, -apple-system, BlinkMacSystemFont,
+            "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    .topbar {
+      background: var(--navy);
+      color: white;
+      padding: 18px 24px;
+    }
+
+    .topbar-inner, main, footer {
+      width: min(1060px, calc(100% - 40px));
+      margin-inline: auto;
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 19px;
+      font-weight: 750;
+      letter-spacing: -.4px;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: #2859d6;
+      font-size: 18px;
+    }
+
+    .sandbox {
+      border: 1px solid #627187;
+      border-radius: 999px;
+      padding: 5px 11px;
+      color: #e5edff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .6px;
+    }
+
+    main { padding: 38px 0 52px; }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 7px 0 10px;
+      font-size: clamp(28px, 4vw, 39px);
+      line-height: 1.2;
+      letter-spacing: -1.2px;
+    }
+
+    .intro {
+      max-width: 650px;
+      margin: 0 0 26px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .notice {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 22px;
+      padding: 14px 16px;
+      border: 1px solid #cbdaf8;
+      border-radius: 12px;
+      background: var(--blue-soft);
+      color: #24447e;
+    }
+
+    .notice strong { display: block; }
+    .notice p { margin: 2px 0 0; font-size: 13px; }
+
+    .panel {
+      margin-bottom: 20px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: 0 5px 22px rgb(20 35 60 / 4%);
+    }
+
+    .panel h2 {
+      margin: 0 0 5px;
+      font-size: 18px;
+      letter-spacing: -.3px;
+    }
+
+    .subtext {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .form-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+    }
+
+    .field { flex: 1; min-width: 0; }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      min-height: 48px;
+      padding: 11px 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      background: white;
+      color: var(--ink);
+    }
+
+    input:focus-visible, button:focus-visible {
+      outline: 3px solid #9bb9ff;
+      outline-offset: 2px;
+    }
+
+    button {
+      min-height: 48px;
+      padding: 11px 18px;
+      border: 0;
+      border-radius: 9px;
+      background: var(--blue);
+      color: white;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    button:hover { background: #1e46b5; }
+    button:disabled { cursor: wait; opacity: .65; }
+
+    .message {
+      margin-top: 14px;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .message.error { color: var(--red); }
+    .message.info { color: var(--muted); }
+
+    #results[hidden], [hidden] { display: none !important; }
+
+    .results-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 30px 0 14px;
+    }
+
+    .results-heading h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .read-only {
+      color: var(--green);
+      background: #eaf7ef;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .result-card {
+      min-width: 0;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .result-card.wide { grid-column: 1 / -1; }
+
+    .card-label {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.1px;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .detail {
+      margin: 8px 0 0;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .status-pill {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 5px 9px;
+      border-radius: 7px;
+      background: #f0f3f8;
+      color: #34445d;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .status-pill.success {
+      background: #eaf7ef;
+      color: var(--green);
+    }
+
+    .status-pill.warning {
+      background: #fff4d6;
+      color: var(--amber);
+    }
+
+    .explanation-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .explanation-label .card-label { margin: 0; }
+
+    .next-step {
+      margin-top: 18px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #f4f7fb;
+    }
+
+    .next-step strong { display: block; margin-bottom: 4px; }
+
+    footer {
+      padding: 0 0 28px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 650px) {
+      .topbar { padding: 15px 0; }
+      .topbar-inner, main, footer { width: calc(100% - 28px); }
+      main { padding-top: 28px; }
+      .form-row { align-items: stretch; flex-direction: column; }
+      .form-row button { width: 100%; }
+      .panel, .result-card { padding: 18px; }
+      .result-grid { grid-template-columns: 1fr; }
+      .result-card.wide { grid-column: auto; }
+      .results-heading { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">P</div>
+        <span>PayPilot AI</span>
+      </div>
+      <span class="sandbox">SANDBOX MODE</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="eyebrow">Payment operations copilot</div>
+    <h1>Investigate a payment.</h1>
+    <p class="intro">
+      Understand what PayPal's order evidence establishes, what remains
+      unverified, and what to check next.
+    </p>
+
+    <section class="notice" aria-label="Safety notice">
+      <div aria-hidden="true">ⓘ</div>
+      <div>
+        <strong>Read-only investigation</strong>
+        <p>
+          PayPal is the source of truth. This tool retrieves Sandbox order
+          evidence and explains it; it does not capture, refund, or move money.
+          An order's completed status alone does not verify settlement.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="lookup-title">
+      <h2 id="lookup-title">Start an investigation</h2>
+      <p class="subtext">
+        Enter a PayPal Sandbox order ID. Use test data only.
+      </p>
+
+      <form id="investigation-form">
+        <div class="form-row">
+          <div class="field">
+            <label for="order-id">PayPal order ID</label>
+            <input
+              id="order-id"
+              name="order_id"
+              type="text"
+              maxlength="128"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. SANDBOX-ORDER-123"
+              required
+            >
+          </div>
+          <button id="investigate-button" type="submit">
+            Investigate order
+          </button>
+        </div>
+      </form>
+      <p id="message" class="message info" role="status" aria-live="polite">
+        Ready when you are. No payment changes will be made.
+      </p>
+    </section>
+
+    <section id="results" hidden aria-labelledby="results-title">
+      <div class="results-heading">
+        <h2 id="results-title">Investigation results</h2>
+        <span class="read-only">READ ONLY</span>
+      </div>
+
+      <div class="result-grid">
+        <article class="result-card">
+          <div class="card-label">PayPal evidence</div>
+          <p id="evidence-id" class="value">—</p>
+          <p class="detail">Order ID</p>
+          <div id="evidence-status" class="status-pill">—</div>
+        </article>
+
+        <article class="result-card">
+          <div class="card-label">Capture assessment</div>
+          <p id="capture-classification" class="value">—</p>
+          <p id="capture-summary" class="detail"></p>
+          <div id="capture-settlement-status" class="status-pill warning">
+            Capture evidence does not verify settlement
+          </div>
+        </article>
+
+        <article class="result-card">
+          <div class="card-label">Deterministic assessment</div>
+          <p id="classification" class="value">—</p>
+          <p id="assessment-summary" class="detail"></p>
+          <div id="settlement-status" class="status-pill warning">
+            Settlement not verified
+          </div>
+        </article>
+
+        <article class="result-card wide">
+          <div class="explanation-label">
+            <div class="card-label">AI-assisted explanation</div>
+            <span id="explanation-status" class="status-pill">—</span>
+          </div>
+          <p id="explanation-text" class="detail"></p>
+          <div class="next-step">
+            <strong>Suggested next step</strong>
+            <p id="next-step" class="detail"></p>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    PayPilot AI · PayPal Sandbox · Financial state is determined by
+    validated evidence, not AI-generated text.
+  </footer>
+
+  <script>
+    const form = document.getElementById("investigation-form");
+    const orderInput = document.getElementById("order-id");
+    const button = document.getElementById("investigate-button");
+    const message = document.getElementById("message");
+    const results = document.getElementById("results");
+
+    function setText(id, value) {
+      document.getElementById(id).textContent =
+        value == null || value === "" ? "Not available" : String(value);
+    }
+
+    function setMessage(text, type = "info") {
+      message.textContent = text;
+      message.className = `message ${type}`;
+    }
+
+    function setPill(id, text, type = "") {
+      const element = document.getElementById(id);
+      element.textContent = text;
+      element.className = `status-pill ${type}`.trim();
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const orderId = orderInput.value.trim();
+
+      if (!orderId) {
+        setMessage("Enter a PayPal Sandbox order ID.", "error");
+        orderInput.focus();
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Investigating…";
+      results.hidden = true;
+      setMessage("Retrieving order evidence and preparing the assessment…");
+
+      try {
+        const response = await fetch(
+          `/api/paypal/orders/${encodeURIComponent(orderId)}/investigation`,
+          {
+            method: "GET",
+            headers: { "Accept": "application/json" }
+          }
+        );
+
+        let data;
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error("The server returned an unreadable response.");
+        }
+
+        if (!response.ok) {
+          const safeMessages = {
+            404: "That order was not found in the configured PayPal Sandbox.",
+            422: "The order ID is invalid. Check it and try again.",
+            502: "PayPal could not complete the lookup. Try again later.",
+            504: "The PayPal lookup timed out. Try again later."
+          };
+          throw new Error(
+            safeMessages[response.status] ||
+            "The investigation could not be completed."
+          );
+        }
+
+        const evidence = data.evidence || {};
+        const assessment = data.assessment || {};
+       const capture = data.capture_assessment || {};
+        const explanation = data.explanation || {};
+
+        setText("evidence-id", evidence.id);
+        setText("evidence-status", evidence.status || "Unknown");
+
+        setText("classification", assessment.classification);
+        setText("assessment-summary", assessment.summary);
+       setText("capture-classification", capture.classification);
+       setText("capture-summary", capture.summary);
+       setPill(
+         "capture-settlement-status",
+         "Capture evidence does not verify settlement",
+         "warning"
+       );
+
+        if (assessment.settlement_verified === true) {
+          setPill("settlement-status", "Settlement verified", "success");
+        } else {
+          setPill(
+            "settlement-status",
+            "Settlement not verified by this evidence",
+            "warning"
+          );
+        }
+
+        if (explanation.status === "generated") {
+          const providerLabels = {
+            gemini: "Gemini",
+            openrouter: "OpenRouter",
+          };
+          const providerLabel = providerLabels[explanation.provider] || "AI";
+          setPill(
+            "explanation-status",
+            `${providerLabel} · AI commentary — review for accuracy`,
+            ""
+          );
+        } else {
+          setPill("explanation-status", "Deterministic fallback", "warning");
+        }
+
+        setText("explanation-text", explanation.explanation);
+        setText("next-step", assessment.next_step);
+
+        results.hidden = false;
+        setMessage(
+          explanation.status === "generated"
+            ? "Investigation complete. Review the evidence and assessment below."
+            : "Investigation complete. AI was unavailable, so the deterministic fallback is shown.",
+          "info"
+        );
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred. Please try again.",
+          "error"
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = "Investigate order";
+      }
+    });
+  </script>
+</body>
+</html>

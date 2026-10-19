@@ -9,3 +9,8 @@ node_modules/
 dist/
 build/
 *.sqlite3
+
+# Local recovery copies; do not publish backups
+*.bak*
+*.backup*
+*~
