@@ -1,5 +1,6 @@
 """FastAPI application for PayPilot AI."""
 
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path as FilePath
@@ -7,6 +8,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.config import get_settings
 from backend.database import InvestigationRepository
@@ -17,6 +19,8 @@ from backend.evidence import (
 )
 from backend.explainer import GeminiExplainer
 from backend.paypal_client import PayPalAPIError, PayPalClient
+from backend.reconciliation import MAX_CSV_BYTES, ReconciliationInputError
+from backend.reconciliation_service import reconcile_csv
 
 
 @asynccontextmanager
@@ -58,6 +62,14 @@ def get_investigation_repository() -> InvestigationRepository:
     return repository
 
 
+class ReconciliationRequest(BaseModel):
+    """Strict JSON request for merchant CSV reconciliation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    csv_text: str
+
+
 @app.get("/", include_in_schema=False)
 def serve_frontend() -> FileResponse:
     """Serve the PayPilot AI investigation interface."""
@@ -95,6 +107,70 @@ def list_investigation_history(
         "investigations": investigations,
         "count": len(investigations),
     }
+
+
+@app.post("/api/reconciliation")
+async def reconcile_merchant_csv(
+    request: Request,
+    paypal: Annotated[PayPalClient, Depends(get_paypal_client)],
+) -> dict[str, object]:
+    """Compare merchant CSV records with PayPal Sandbox orders."""
+    max_request_bytes = (MAX_CSV_BYTES * 2) + 4096
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_request_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="The reconciliation request is too large.",
+                )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="The request size header is invalid.",
+            ) from exc
+
+    body_chunks = []
+    body_size = 0
+
+    async for chunk in request.stream():
+        body_size += len(chunk)
+        if body_size > max_request_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="The reconciliation request is too large.",
+            )
+        body_chunks.append(chunk)
+
+    body = b"".join(body_chunks)
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="A valid JSON request body is required.",
+        ) from exc
+
+    try:
+        validated = ReconciliationRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="The request must contain only a string csv_text field.",
+        ) from exc
+
+    if len(validated.csv_text.encode("utf-8")) > MAX_CSV_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="The CSV exceeds the 1 MB size limit.",
+        )
+
+    try:
+        return reconcile_csv(validated.csv_text, paypal)
+    except ReconciliationInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/paypal/orders/{order_id}")

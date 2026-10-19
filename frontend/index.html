@@ -480,9 +480,53 @@
         </article>
       </div>
     </section>
-    <section
-      class="panel"
-      id="investigation-history"
+    <section class="panel" id="reconciliation-panel" aria-labelledby="reconciliation-title">
+     <h2 id="reconciliation-title">Merchant reconciliation</h2>
+     <p class="subtext">
+       Compare a merchant CSV against PayPal Sandbox order evidence.
+       Maximum 1 MB and 1,000 records.
+     </p>
+
+     <div class="history-warning">
+       A matching order amount and currency do not prove payment settlement.
+       This tool performs read-only lookups and does not move money.
+     </div>
+
+     <form id="reconciliation-form">
+       <div class="field">
+         <label for="reconciliation-file">Merchant CSV file</label>
+         <input
+           id="reconciliation-file"
+           name="reconciliation_file"
+           type="file"
+           accept=".csv,text/csv"
+           required
+         >
+       </div>
+       <p class="subtext">
+         Required columns: merchant_reference, paypal_order_id,
+         expected_amount, currency_code
+       </p>
+       <button id="reconciliation-button" type="submit">
+         Run reconciliation
+       </button>
+     </form>
+
+     <p id="reconciliation-message" class="message info"
+        role="status" aria-live="polite">
+       Select a CSV file to begin.
+     </p>
+
+     <section id="reconciliation-results" hidden
+              aria-labelledby="reconciliation-results-title">
+       <h3 id="reconciliation-results-title">Reconciliation results</h3>
+       <p id="reconciliation-counts" class="subtext"></p>
+       <div id="reconciliation-result-list" class="history-list"></div>
+     </section>
+   </section>
+   <section
+     class="panel"
+     id="investigation-history"
       aria-labelledby="history-title"
     >
       <div class="history-heading">
@@ -621,6 +665,172 @@
       refreshHistoryButton.disabled = false;
     }
   }
+
+
+  const reconciliationForm = document.getElementById("reconciliation-form");
+  const reconciliationFile = document.getElementById("reconciliation-file");
+  const reconciliationButton = document.getElementById("reconciliation-button");
+  const reconciliationMessage = document.getElementById("reconciliation-message");
+  const reconciliationResults = document.getElementById("reconciliation-results");
+  const reconciliationCounts = document.getElementById("reconciliation-counts");
+  const reconciliationList = document.getElementById("reconciliation-result-list");
+
+  const reconciliationStatuses = [
+    "matched",
+    "amount_mismatch",
+    "currency_mismatch",
+    "needs_review",
+    "order_not_found",
+    "lookup_error"
+  ];
+
+  function setReconciliationMessage(text, type = "info") {
+    reconciliationMessage.textContent = text;
+    reconciliationMessage.className = `message ${type}`;
+  }
+
+  function renderReconciliationResult(item) {
+    const article = document.createElement("article");
+    article.className = "history-item";
+
+    const heading = document.createElement("h3");
+    heading.textContent = String(item.merchant_reference);
+    article.appendChild(heading);
+
+    const status = document.createElement("p");
+    status.className = "status-pill warning";
+    status.textContent = item.status.replaceAll("_", " ");
+    article.appendChild(status);
+
+    addHistoryDetail(article, "PayPal order ID", item.paypal_order_id);
+    addHistoryDetail(article, "Expected amount", item.expected_amount);
+    addHistoryDetail(article, "Expected currency", item.expected_currency);
+    addHistoryDetail(article, "Observed amount", item.observed_amount);
+    addHistoryDetail(article, "Observed currency", item.observed_currency);
+    addHistoryDetail(article, "Result", item.summary);
+    addHistoryDetail(article, "Settlement verified", "No");
+
+    return article;
+  }
+
+  reconciliationForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const file = reconciliationFile.files && reconciliationFile.files[0];
+
+    if (!file) {
+      setReconciliationMessage("Choose a CSV file before starting.", "error");
+      reconciliationFile.focus();
+      return;
+    }
+
+    if (file.size > 1_000_000) {
+      setReconciliationMessage("The CSV exceeds the 1 MB size limit.", "error");
+      return;
+    }
+
+    reconciliationButton.disabled = true;
+    reconciliationButton.textContent = "Reconciling…";
+    reconciliationResults.hidden = true;
+    reconciliationList.replaceChildren();
+    reconciliationCounts.textContent = "";
+    setReconciliationMessage("Reading the CSV and checking PayPal Sandbox orders…");
+
+    try {
+      const csvText = await file.text();
+
+      const response = await fetch("/api/reconciliation", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ csv_text: csvText })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        const safeMessages = {
+          400: "The request was invalid. Check the file and try again.",
+          413: "The CSV exceeds the 1 MB size limit.",
+          422: "The CSV format or its records are invalid. Check the required columns and values.",
+          502: "PayPal could not complete one or more lookups. Try again later.",
+          504: "A PayPal lookup timed out. Try again later."
+        };
+        throw new Error(
+          safeMessages[response.status] ||
+          "Reconciliation could not be completed."
+        );
+      }
+
+      if (
+        !data ||
+        !Array.isArray(data.results) ||
+        data.count !== data.results.length ||
+        !data.counts ||
+        typeof data.counts !== "object" ||
+        Array.isArray(data.counts) ||
+        data.settlement_verified !== false
+      ) {
+        throw new Error("The server returned an invalid reconciliation response.");
+      }
+
+      for (const item of data.results) {
+        if (
+          !item ||
+          typeof item !== "object" ||
+          typeof item.merchant_reference !== "string" ||
+          typeof item.paypal_order_id !== "string" ||
+          !reconciliationStatuses.includes(item.status) ||
+          item.settlement_verified !== false
+        ) {
+          throw new Error("The server returned an invalid reconciliation record.");
+        }
+      }
+
+      const counts = Object.fromEntries(
+        reconciliationStatuses.map((status) => [status, 0])
+      );
+
+      for (const item of data.results) {
+        counts[item.status] += 1;
+        reconciliationList.appendChild(renderReconciliationResult(item));
+      }
+
+      reconciliationCounts.textContent = [
+        `Total records: ${data.results.length}`,
+        ...reconciliationStatuses.map(
+          (status) => `${status.replaceAll("_", " ")}: ${counts[status]}`
+        ),
+        "Settlement verified: No"
+      ].join(" · ");
+
+      reconciliationResults.hidden = false;
+      setReconciliationMessage(
+        `Reconciliation complete. Reviewed ${data.results.length} record(s). Settlement has not been verified.`,
+        "info"
+      );
+    } catch (error) {
+      reconciliationResults.hidden = true;
+      reconciliationList.replaceChildren();
+      reconciliationCounts.textContent = "";
+      setReconciliationMessage(
+        error instanceof Error
+          ? error.message
+          : "Reconciliation could not be completed.",
+        "error"
+      );
+    } finally {
+      reconciliationButton.disabled = false;
+      reconciliationButton.textContent = "Run reconciliation";
+    }
+  });
 
   refreshHistoryButton.addEventListener("click", loadInvestigationHistory);
 
