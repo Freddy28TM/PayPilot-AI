@@ -81,6 +81,11 @@ class PayPalClient:
                 "PayPal returned an invalid authentication response."
             ) from exc
 
+        if not isinstance(payload, dict):
+            raise RuntimeError(  # noqa: TRY004 — malformed upstream response
+                "PayPal returned an invalid authentication response."
+            )
+
         token = payload.get("access_token")
         expires_in = payload.get("expires_in", 300)
 

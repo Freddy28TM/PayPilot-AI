@@ -221,3 +221,19 @@ def test_create_sandbox_test_order_rejects_invalid_response(
         pytest.raises(RuntimeError, match=error_message),
     ):
         paypal.create_sandbox_test_order()
+
+
+@pytest.mark.parametrize("response_body", [[], None, "unexpected", 42])
+def test_authentication_rejects_non_object_json(response_body):
+    def handler(request):
+        return httpx.Response(200, json=response_body)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http,
+        PayPalClient(settings=make_settings(), http_client=http) as paypal,
+        pytest.raises(
+            RuntimeError,
+            match="invalid authentication response",
+        ),
+    ):
+        paypal.get_access_token()
