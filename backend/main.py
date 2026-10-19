@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Request
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 
 from backend.config import get_settings
@@ -73,6 +73,28 @@ def serve_frontend() -> FileResponse:
 def health_check() -> dict[str, str]:
     """Report whether the API process is responding."""
     return {"status": "ok", "environment": "sandbox"}
+
+
+@app.get("/api/investigations")
+def list_investigation_history(
+    repository: Annotated[
+        InvestigationRepository, Depends(get_investigation_repository)
+    ],
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> dict[str, object]:
+    """Return recent investigation history without contacting PayPal."""
+    try:
+        investigations = repository.list_investigations(limit=limit)
+    except sqlite3.Error as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Investigation history is temporarily unavailable.",
+        ) from exc
+
+    return {
+        "investigations": investigations,
+        "count": len(investigations),
+    }
 
 
 @app.get("/api/paypal/orders/{order_id}")

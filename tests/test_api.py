@@ -243,6 +243,98 @@ def test_investigation_endpoint_handles_history_database_failure(api_client):
     assert "private database detail" not in response.text
 
 
+def test_investigation_history_endpoint_returns_newest_first(api_client):
+    client, fake_paypal = api_client
+    repository = fake_paypal.repository
+
+    repository.save_investigation(
+        {"id": "OLDER-ORDER", "status": "CREATED"},
+        {
+            "classification": "order_created",
+            "settlement_verified": False,
+        },
+    )
+    repository.save_investigation(
+        {"id": "NEWER-ORDER", "status": "COMPLETED"},
+        {
+            "classification": "completed_settlement_unverified",
+            "settlement_verified": False,
+        },
+    )
+
+    response = client.get("/api/investigations")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert [item["order_id"] for item in payload["investigations"]] == [
+        "NEWER-ORDER",
+        "OLDER-ORDER",
+    ]
+    assert set(payload["investigations"][0]) == {
+        "id",
+        "order_id",
+        "observed_status",
+        "classification",
+        "settlement_verified",
+        "investigated_at",
+    }
+    assert payload["investigations"][0]["settlement_verified"] == 0
+
+
+def test_investigation_history_endpoint_applies_limit(api_client):
+    client, fake_paypal = api_client
+    repository = fake_paypal.repository
+
+    for order_id in ("ORDER-1", "ORDER-2", "ORDER-3"):
+        repository.save_investigation(
+            {"id": order_id, "status": "CREATED"},
+            {
+                "classification": "order_created",
+                "settlement_verified": False,
+            },
+        )
+
+    response = client.get("/api/investigations?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert len(payload["investigations"]) == 1
+    assert payload["investigations"][0]["order_id"] == "ORDER-3"
+
+
+@pytest.mark.parametrize("limit", ["0", "501", "invalid"])
+def test_investigation_history_endpoint_rejects_invalid_limit(
+    api_client, limit
+):
+    client, _ = api_client
+
+    response = client.get(f"/api/investigations?limit={limit}")
+
+    assert response.status_code == 422
+
+
+def test_investigation_history_endpoint_handles_database_failure(api_client):
+    client, _ = api_client
+
+    class BrokenRepository:
+        def list_investigations(self, limit=50):
+            raise sqlite3.OperationalError("private database detail")
+
+    app.dependency_overrides[get_investigation_repository] = (
+        lambda: BrokenRepository()
+    )
+
+    response = client.get("/api/investigations")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Investigation history is temporarily unavailable."
+    )
+    assert "private database detail" not in response.text
+
+
 @pytest.mark.parametrize(
     "path",
     [
