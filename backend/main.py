@@ -1,5 +1,6 @@
 """FastAPI application for PayPilot AI."""
 
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path as FilePath
 from typing import Annotated
@@ -8,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Path, Request
 from fastapi.responses import FileResponse
 
 from backend.config import get_settings
+from backend.database import InvestigationRepository
 from backend.evidence import (
     assess_capture_evidence,
     classify_order_evidence,
@@ -47,6 +49,13 @@ def get_paypal_client(request: Request) -> PayPalClient:
 def get_gemini_explainer(request: Request) -> GeminiExplainer:
     """Return the application-scoped Gemini explainer."""
     return request.app.state.gemini_explainer
+
+
+def get_investigation_repository() -> InvestigationRepository:
+    """Create and initialize the local investigation repository."""
+    repository = InvestigationRepository()
+    repository.initialize()
+    return repository
 
 
 @app.get("/", include_in_schema=False)
@@ -113,6 +122,9 @@ def investigate_paypal_order(
     explainer: Annotated[
         GeminiExplainer, Depends(get_gemini_explainer)
     ],
+    repository: Annotated[
+        InvestigationRepository, Depends(get_investigation_repository)
+    ],
 ) -> dict:
     """Retrieve and deterministically classify PayPal order evidence."""
     if not order_id.strip():
@@ -147,11 +159,20 @@ def investigate_paypal_order(
         ) from exc
 
     assessment = classify_order_evidence(order)
+    evidence = select_order_evidence(order)
+    try:
+        repository.save_investigation(evidence, assessment)
+    except sqlite3.Error as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Investigation history is temporarily unavailable.",
+        ) from exc
+
     capture_assessment = assess_capture_evidence(order)
     explanation = explainer.explain(order, assessment)
 
     return {
-        "evidence": select_order_evidence(order),
+        "evidence": evidence,
         "assessment": assessment,
         "capture_assessment": capture_assessment,
         "explanation": explanation,

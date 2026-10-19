@@ -1,11 +1,16 @@
 """Tests for the read-only PayPilot AI API."""
 
+
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.database import InvestigationRepository
 from backend.main import (
     app,
     get_gemini_explainer,
+    get_investigation_repository,
     get_paypal_client,
 )
 from backend.paypal_client import PayPalAPIError
@@ -41,12 +46,18 @@ class FakeGeminiExplainer:
 
 
 @pytest.fixture
-def api_client():
+def api_client(tmp_path):
     fake_paypal = FakePayPalClient()
     app.dependency_overrides[get_paypal_client] = lambda: fake_paypal
     fake_explainer = FakeGeminiExplainer()
     app.dependency_overrides[get_gemini_explainer] = (
         lambda: fake_explainer
+    )
+    repository = InvestigationRepository(tmp_path / "history.sqlite3")
+    repository.initialize()
+    fake_paypal.repository = repository
+    app.dependency_overrides[get_investigation_repository] = (
+        lambda: repository
     )
 
     try:
@@ -176,6 +187,14 @@ def test_investigation_endpoint_returns_assessment(api_client):
         body["assessment"]["summary"]
     )
     assert fake_paypal.requested_order_id == "TEST-ORDER"
+    records = fake_paypal.repository.list_investigations()
+    assert len(records) == 1
+    assert records[0]["order_id"] == "TEST-ORDER"
+    assert records[0]["observed_status"] == "COMPLETED"
+    assert records[0]["classification"] == (
+        "completed_settlement_unverified"
+    )
+    assert records[0]["settlement_verified"] == 0
 
 
 def test_investigation_endpoint_maps_unknown_order_to_404(api_client):
@@ -200,6 +219,28 @@ def test_investigation_endpoint_does_not_leak_upstream_error(api_client):
 
     assert response.status_code == 502
     assert "private upstream detail" not in response.text
+
+
+def test_investigation_endpoint_handles_history_database_failure(api_client):
+    client, _ = api_client
+
+    class BrokenRepository:
+        def save_investigation(self, evidence, assessment):
+            raise sqlite3.OperationalError("private database detail")
+
+    app.dependency_overrides[get_investigation_repository] = (
+        lambda: BrokenRepository()
+    )
+
+    response = client.get(
+        "/api/paypal/orders/TEST-ORDER/investigation"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Investigation history is temporarily unavailable."
+    )
+    assert "private database detail" not in response.text
 
 
 @pytest.mark.parametrize(
