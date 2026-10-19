@@ -193,7 +193,63 @@
     .message.error { color: var(--red); }
     .message.info { color: var(--muted); }
 
-    #results[hidden], [hidden] { display: none !important; }
+
+   .history-heading {
+     display: flex;
+     align-items: center;
+     justify-content: space-between;
+     gap: 12px;
+     margin-bottom: 14px;
+   }
+
+   .history-heading h2 { margin: 0 0 5px; }
+
+   .history-list {
+     display: grid;
+     gap: 12px;
+   }
+
+   .history-item {
+     min-width: 0;
+     padding: 16px;
+     border: 1px solid var(--line);
+     border-radius: 12px;
+     background: var(--surface);
+   }
+
+   .history-item h3 {
+     margin: 0 0 10px;
+     font-size: 15px;
+     overflow-wrap: anywhere;
+   }
+
+   .history-item p {
+     margin: 6px 0;
+     font-size: 13px;
+     overflow-wrap: anywhere;
+   }
+
+   .history-label {
+     color: var(--muted);
+     font-weight: 700;
+   }
+
+   .history-warning {
+     margin: 0 0 16px;
+     padding: 12px 14px;
+     border: 1px solid #ead7a4;
+     border-radius: 10px;
+     background: #fff9e9;
+     color: #76530b;
+     font-size: 13px;
+   }
+
+   @media (max-width: 650px) {
+     .history-heading { align-items: flex-start; }
+     .history-heading button { padding: 10px 12px; }
+   }
+
+   #results[hidden], [hidden] { display: none !important; }
 
     .results-heading {
       display: flex;
@@ -424,6 +480,32 @@
         </article>
       </div>
     </section>
+    <section
+      class="panel"
+      id="investigation-history"
+      aria-labelledby="history-title"
+    >
+      <div class="history-heading">
+        <div>
+          <h2 id="history-title">Recent investigations</h2>
+          <p class="subtext">Previously saved investigation records, newest first.</p>
+        </div>
+        <button id="refresh-history" type="button">Refresh history</button>
+      </div>
+
+      <p class="history-warning">
+        This history records investigation results; it is not proof of payment.
+        An order's completed status does not verify settlement.
+      </p>
+
+      <p
+        id="history-message"
+        class="message info"
+        role="status"
+        aria-live="polite"
+      >Loading investigation history…</p>
+      <div id="history-list" class="history-list"></div>
+    </section>
   </main>
 
   <footer>
@@ -454,7 +536,95 @@
       element.className = `status-pill ${type}`.trim();
     }
 
-    form.addEventListener("submit", async (event) => {
+    const historyList = document.getElementById("history-list");
+  const historyMessage = document.getElementById("history-message");
+  const refreshHistoryButton = document.getElementById("refresh-history");
+
+  function addHistoryDetail(container, label, value) {
+    const paragraph = document.createElement("p");
+    const labelElement = document.createElement("span");
+    labelElement.className = "history-label";
+    labelElement.textContent = `${label}: `;
+    paragraph.append(labelElement, document.createTextNode(
+      value == null || value === "" ? "Not available" : String(value)
+    ));
+    container.appendChild(paragraph);
+  }
+
+  async function loadInvestigationHistory() {
+    refreshHistoryButton.disabled = true;
+    historyMessage.className = "message info";
+    historyMessage.textContent = "Loading investigation history…";
+
+    try {
+      const response = await fetch("/api/investigations?limit=50", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The history response could not be read.");
+      }
+
+      if (!response.ok || !Array.isArray(data.investigations)) {
+        throw new Error("Investigation history is temporarily unavailable.");
+      }
+
+      historyList.replaceChildren();
+
+      if (data.investigations.length === 0) {
+        historyMessage.textContent =
+          "No saved investigations yet. Investigate a Sandbox order to begin.";
+        return;
+      }
+
+      for (const item of data.investigations) {
+        const article = document.createElement("article");
+        article.className = "history-item";
+
+        const heading = document.createElement("h3");
+        heading.textContent = item.order_id == null
+          ? "Order ID not available"
+          : String(item.order_id);
+        article.appendChild(heading);
+
+        addHistoryDetail(article, "Observed status", item.observed_status);
+
+        const classification = item.classification == null
+          ? "Not available"
+          : String(item.classification).replaceAll("_", " ");
+        addHistoryDetail(article, "Assessment", classification);
+
+        let timestamp = "Not available";
+        if (typeof item.investigated_at === "string" && item.investigated_at) {
+          const parsedDate = new Date(item.investigated_at);
+          if (!Number.isNaN(parsedDate.getTime())) {
+            timestamp = parsedDate.toLocaleString();
+          }
+        }
+        addHistoryDetail(article, "Investigated", timestamp);
+
+        historyList.appendChild(article);
+      }
+
+      historyMessage.textContent =
+        `Showing ${data.investigations.length} saved investigation(s).`;
+    } catch {
+      historyList.replaceChildren();
+      historyMessage.className = "message error";
+      historyMessage.textContent =
+        "Could not load investigation history. Use Refresh history to try again.";
+    } finally {
+      refreshHistoryButton.disabled = false;
+    }
+  }
+
+  refreshHistoryButton.addEventListener("click", loadInvestigationHistory);
+
+  form.addEventListener("submit", async (event) => {
       event.preventDefault();
 
       const orderId = orderInput.value.trim();
@@ -546,6 +716,7 @@
         setText("next-step", assessment.next_step);
 
         results.hidden = false;
+      await loadInvestigationHistory();
         setMessage(
           explanation.status === "generated"
             ? "Investigation complete. Review the evidence and assessment below."
@@ -564,6 +735,7 @@
         button.textContent = "Investigate order";
       }
     });
+  loadInvestigationHistory();
   </script>
 </body>
 </html>
