@@ -198,6 +198,38 @@ def test_find_previous_matches_returns_identifier_and_run_details(repository):
     ]
 
 
+
+def test_find_previous_matches_reports_conflicting_identifiers(repository):
+    merchant_run = make_result()
+    merchant_run["results"][0]["merchant_reference"] = "INV-CONFLICT"
+    merchant_run["results"][0]["paypal_order_id"] = "ORDER-A"
+    merchant_run_id = repository.save_run(merchant_run)
+
+    order_run = make_result()
+    order_run["results"][0]["merchant_reference"] = "INV-B"
+    order_run["results"][0]["paypal_order_id"] = "ORDER-CONFLICT"
+    order_run_id = repository.save_run(order_run)
+
+    matches = repository.find_previous_matches(
+        merchant_reference="INV-CONFLICT",
+        paypal_order_id="ORDER-CONFLICT",
+    )
+
+    assert matches == [
+        {
+            "match_type": "paypal_order_id",
+            "run_id": order_run_id,
+            "row_number": 1,
+            "matched_value": "ORDER-CONFLICT",
+        },
+        {
+            "match_type": "merchant_reference",
+            "run_id": merchant_run_id,
+            "row_number": 1,
+            "matched_value": "INV-CONFLICT",
+        },
+    ]
+
 def test_find_previous_matches_returns_empty_list_when_unseen(repository):
     repository.save_run(make_result())
 

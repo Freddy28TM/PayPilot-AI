@@ -358,6 +358,60 @@ def test_cross_run_matches_are_informational_and_do_not_change_counts(
     assert history["count"] == 3
     assert all(run["settlement_verified"] is False for run in history["runs"])
 
+
+def test_conflicting_historical_identifiers_are_informational(
+    reconciliation_client,
+):
+    client, fake_paypal = reconciliation_client
+    fake_paypal.orders["ORDER-2"] = {
+        "id": "ORDER-2",
+        "purchase_units": [
+            {"amount": {"value": "25.00", "currency_code": "USD"}}
+        ],
+    }
+
+    first = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-CONFLICT,ORDER-1,25.00,USD\n"),
+    )
+    assert first.status_code == 200
+    first_run_id = first.json()["run_id"]
+
+    second = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-SECOND,ORDER-2,25.00,USD\n"),
+    )
+    assert second.status_code == 200
+    second_run_id = second.json()["run_id"]
+
+    current = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-CONFLICT,ORDER-2,25.00,USD\n"),
+    )
+
+    assert current.status_code == 200
+    body = current.json()
+    row = body["results"][0]
+
+    assert row["status"] == "matched"
+    assert body["counts"] == {"matched": 1}
+    assert row["settlement_verified"] is False
+    assert body["settlement_verified"] is False
+    assert row["historical_matches"] == [
+        {
+            "match_type": "paypal_order_id",
+            "run_id": second_run_id,
+            "row_number": 1,
+            "matched_value": "ORDER-2",
+        },
+        {
+            "match_type": "merchant_reference",
+            "run_id": first_run_id,
+            "row_number": 1,
+            "matched_value": "INV-CONFLICT",
+        },
+    ]
+
 def test_successful_run_can_be_listed_and_retrieved_without_paypal_calls(
     reconciliation_client,
 ):
