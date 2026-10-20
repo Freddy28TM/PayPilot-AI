@@ -270,6 +270,94 @@ def test_oversized_stream_without_content_length_is_rejected():
         max_request_bytes // chunk_size
     ) + 1
 
+
+def test_first_reconciliation_has_no_historical_matches(reconciliation_client):
+    client, _ = reconciliation_client
+
+    response = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-FIRST,ORDER-1,25.00,USD\n"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"][0]["historical_matches"] == []
+    assert body["counts"] == {"matched": 1}
+    assert body["results"][0]["status"] == "matched"
+    assert body["settlement_verified"] is False
+
+
+def test_cross_run_matches_are_informational_and_do_not_change_counts(
+    reconciliation_client,
+):
+    client, fake_paypal = reconciliation_client
+    fake_paypal.orders["ORDER-2"] = {
+        "id": "ORDER-2",
+        "purchase_units": [
+            {"amount": {"value": "25.00", "currency_code": "USD"}}
+        ],
+    }
+
+    first = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-REPEAT,ORDER-1,25.00,USD\n"),
+    )
+    assert first.status_code == 200
+    first_run_id = first.json()["run_id"]
+    assert first.json()["results"][0]["historical_matches"] == []
+
+    second = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-REPEAT,ORDER-2,25.00,USD\n"),
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    second_row = second_body["results"][0]
+
+    assert second_row["status"] == "matched"
+    assert second_body["counts"] == {"matched": 1}
+    assert second_row["settlement_verified"] is False
+    assert second_body["settlement_verified"] is False
+    assert second_row["historical_matches"] == [
+        {
+            "match_type": "merchant_reference",
+            "run_id": first_run_id,
+            "row_number": 1,
+            "matched_value": "INV-REPEAT",
+        }
+    ]
+
+    third = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-NEW,ORDER-2,25.00,USD\n"),
+    )
+    assert third.status_code == 200
+    third_row = third.json()["results"][0]
+
+    assert third_row["status"] == "matched"
+    assert third.json()["counts"] == {"matched": 1}
+    assert third_row["settlement_verified"] is False
+    assert [
+        {
+            "match_type": item["match_type"],
+            "run_id": item["run_id"],
+            "row_number": item["row_number"],
+            "matched_value": item["matched_value"],
+        }
+        for item in third_row["historical_matches"]
+    ] == [
+        {
+            "match_type": "paypal_order_id",
+            "run_id": second_body["run_id"],
+            "row_number": 1,
+            "matched_value": "ORDER-2",
+        }
+    ]
+
+    history = client.get("/api/reconciliation/runs").json()
+    assert history["count"] == 3
+    assert all(run["settlement_verified"] is False for run in history["runs"])
+
 def test_successful_run_can_be_listed_and_retrieved_without_paypal_calls(
     reconciliation_client,
 ):
@@ -321,6 +409,9 @@ def test_reconciliation_history_limit_is_validated(reconciliation_client):
 
 class BrokenReconciliationRepository:
     """Simulate storage failures without touching a real database."""
+
+    def find_previous_matches(self, *, merchant_reference, paypal_order_id):
+        raise sqlite3.OperationalError("private database path")
 
     def save_run(self, result):
         raise sqlite3.OperationalError("private database path")

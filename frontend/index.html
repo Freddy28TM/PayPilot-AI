@@ -702,6 +702,21 @@
     "lookup_error"
   ];
 
+  function validHistoricalMatches(matches) {
+    return Array.isArray(matches) && matches.every((match) =>
+      match &&
+      typeof match === "object" &&
+      !Array.isArray(match) &&
+      ["merchant_reference", "paypal_order_id"].includes(match.match_type) &&
+      Number.isSafeInteger(match.run_id) &&
+      match.run_id > 0 &&
+      Number.isSafeInteger(match.row_number) &&
+      match.row_number > 0 &&
+      typeof match.matched_value === "string" &&
+      match.matched_value.trim().length > 0
+    );
+  }
+
   function setReconciliationMessage(text, type = "info") {
     reconciliationMessage.textContent = text;
     reconciliationMessage.className = `message ${type}`;
@@ -727,6 +742,34 @@
     addHistoryDetail(article, "Observed currency", item.observed_currency);
     addHistoryDetail(article, "Result", item.summary);
     addHistoryDetail(article, "Settlement verified", "No");
+
+    if (Array.isArray(item.historical_matches)) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Historical matches";
+      article.appendChild(heading);
+
+      if (item.historical_matches.length === 0) {
+        addHistoryDetail(
+          article,
+          "Informational check",
+          "No previous saved rows matched these identifiers."
+        );
+      } else {
+        addHistoryDetail(
+          article,
+          "Notice",
+          "These matches are informational and do not change the reconciliation result."
+        );
+
+        for (const match of item.historical_matches) {
+          addHistoryDetail(
+            article,
+            `Previous ${match.match_type.replaceAll("_", " ")} match`,
+            `Run ${match.run_id}, row ${match.row_number}: ${match.matched_value}`
+          );
+        }
+      }
+    }
 
     return article;
   }
@@ -982,7 +1025,9 @@
           typeof item.merchant_reference !== "string" ||
           typeof item.paypal_order_id !== "string" ||
           !reconciliationStatuses.includes(item.status) ||
-          item.settlement_verified !== false
+          item.settlement_verified !== false ||
+          (item.historical_matches !== undefined &&
+            !validHistoricalMatches(item.historical_matches))
         ) {
           throw new Error("The server returned an invalid reconciliation record.");
         }

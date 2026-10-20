@@ -198,6 +198,89 @@ test("successful reconciliation renders results and sends CSV text", async () =>
   assert.equal(elements["reconciliation-button"].disabled, false);
 });
 
+test("historical matches render as informational text", async () => {
+  const payload = validPayload([
+    result({
+      historical_matches: [
+        {
+          match_type: "merchant_reference",
+          run_id: 4,
+          row_number: 2,
+          matched_value: "INV-1001",
+        },
+        {
+          match_type: "paypal_order_id",
+          run_id: 5,
+          row_number: 1,
+          matched_value: "ORDER-1",
+        },
+      ],
+    }),
+  ]);
+
+  const { elements } = await startHarness(response(payload));
+  attachFile(elements);
+  await submit(elements);
+
+  const article = elements["reconciliation-result-list"].children[0];
+  assert.match(article.textContent, /Historical matches/);
+  assert.match(article.textContent, /Previous merchant reference match/);
+  assert.match(article.textContent, /Run 4, row 2: INV-1001/);
+  assert.match(article.textContent, /Previous paypal order id match/);
+  assert.match(article.textContent, /Run 5, row 1: ORDER-1/);
+  assert.match(article.textContent, /informational/i);
+  assert.match(elements["reconciliation-counts"].textContent, /matched: 1/);
+  assert.match(elements["reconciliation-counts"].textContent, /Settlement verified: No/);
+});
+
+test("malformed historical matches are rejected", async (t) => {
+  const invalidMatches = [
+    "not-an-array",
+    [{ match_type: "unknown", run_id: 1, row_number: 1, matched_value: "X" }],
+    [{ match_type: "merchant_reference", run_id: 0, row_number: 1, matched_value: "X" }],
+    [{ match_type: "paypal_order_id", run_id: 1, row_number: 0, matched_value: "X" }],
+    [{ match_type: "merchant_reference", run_id: 1, row_number: 1, matched_value: " " }],
+  ];
+
+  for (const historical_matches of invalidMatches) {
+    await t.test(JSON.stringify(historical_matches), async () => {
+      const { elements } = await startHarness(
+        response(validPayload([result({ historical_matches })]))
+      );
+      attachFile(elements);
+      await submit(elements);
+
+      assert.match(
+        elements["reconciliation-message"].textContent,
+        /invalid reconciliation record/
+      );
+      assert.equal(elements["reconciliation-results"].hidden, true);
+      assert.equal(elements["reconciliation-result-list"].children.length, 0);
+    });
+  }
+});
+
+test("untrusted historical match values render as text", async () => {
+  const unsafeValue = '<img src=x onerror="alert(1)">';
+  const { elements } = await startHarness(response(validPayload([
+    result({
+      historical_matches: [{
+        match_type: "merchant_reference",
+        run_id: 3,
+        row_number: 1,
+        matched_value: unsafeValue,
+      }],
+    }),
+  ])));
+
+  attachFile(elements);
+  await submit(elements);
+
+  const article = elements["reconciliation-result-list"].children[0];
+  assert.ok(article.textContent.includes(unsafeValue));
+  assert.equal(article.children.some((child) => child.tagName === "img"), false);
+});
+
 test("untrusted reconciliation values are rendered as text", async () => {
   const unsafeReference = '<img src=x onerror="alert(1)">';
   const payload = validPayload([

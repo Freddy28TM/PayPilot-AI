@@ -324,6 +324,54 @@ class ReconciliationRepository:
 
         return run_id
 
+    def find_previous_matches(
+        self,
+        *,
+        merchant_reference: str,
+        paypal_order_id: str,
+    ) -> list[dict[str, Any]]:
+        """Find earlier saved rows sharing either reconciliation identifier."""
+        for field, value in (
+            ("merchant_reference", merchant_reference),
+            ("paypal_order_id", paypal_order_id),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be non-empty text.")
+
+        merchant_reference = merchant_reference.strip()
+        paypal_order_id = paypal_order_id.strip()
+
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM (
+                    SELECT
+                        'merchant_reference' AS match_type,
+                        run_id,
+                        row_number,
+                        merchant_reference AS matched_value
+                    FROM reconciliation_run_items
+                    WHERE merchant_reference = ?
+
+                    UNION ALL
+
+                    SELECT
+                        'paypal_order_id' AS match_type,
+                        run_id,
+                        row_number,
+                        paypal_order_id AS matched_value
+                    FROM reconciliation_run_items
+                    WHERE paypal_order_id = ?
+                )
+                ORDER BY run_id DESC, row_number ASC, match_type ASC
+                """,
+                (merchant_reference, paypal_order_id),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         """Return recent reconciliation run summaries, newest first."""
         if isinstance(limit, bool) or not isinstance(limit, int):

@@ -195,6 +195,12 @@ async def reconcile_merchant_csv(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
+        for row in result["results"]:
+            row["historical_matches"] = repository.find_previous_matches(
+                merchant_reference=row["merchant_reference"],
+                paypal_order_id=row["paypal_order_id"],
+            )
+
         result["run_id"] = repository.save_run(result)
     except (sqlite3.Error, OSError) as exc:
         raise HTTPException(

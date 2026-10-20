@@ -173,6 +173,67 @@ def test_failed_row_insert_rolls_back_the_whole_run(repository):
     assert repository.list_runs() == []
 
 
+
+def test_find_previous_matches_returns_identifier_and_run_details(repository):
+    earlier_run_id = repository.save_run(make_result())
+
+    matches = repository.find_previous_matches(
+        merchant_reference=" INV-001 ",
+        paypal_order_id=" ORDER-001 ",
+    )
+
+    assert matches == [
+        {
+            "match_type": "merchant_reference",
+            "run_id": earlier_run_id,
+            "row_number": 1,
+            "matched_value": "INV-001",
+        },
+        {
+            "match_type": "paypal_order_id",
+            "run_id": earlier_run_id,
+            "row_number": 1,
+            "matched_value": "ORDER-001",
+        },
+    ]
+
+
+def test_find_previous_matches_returns_empty_list_when_unseen(repository):
+    repository.save_run(make_result())
+
+    matches = repository.find_previous_matches(
+        merchant_reference="NEW-REF",
+        paypal_order_id="NEW-ORDER",
+    )
+
+    assert matches == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("merchant_reference", ""),
+        ("merchant_reference", "  "),
+        ("paypal_order_id", ""),
+        ("paypal_order_id", "  "),
+        ("merchant_reference", None),
+        ("paypal_order_id", 123),
+    ],
+)
+def test_find_previous_matches_rejects_invalid_identifiers(
+    repository, field, value
+):
+    arguments = {
+        "merchant_reference": "INV-001",
+        "paypal_order_id": "ORDER-001",
+    }
+    arguments[field] = value
+
+    with pytest.raises(ValueError):
+        repository.find_previous_matches(**arguments)
+
+    assert repository.list_runs() == []
+
 def test_empty_run_can_be_saved(repository):
     result = make_result()
     result["results"] = []
