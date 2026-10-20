@@ -60,6 +60,7 @@ def reconcile_records(
                 "observed_amount": None,
                 "observed_currency": None,
                 "settlement_verified": False,
+                "risk_signals": ["duplicate_in_file"],
             }
             results.append(result)
             continue
@@ -90,6 +91,7 @@ def reconcile_records(
 
     counts: dict[str, int] = {}
     for result in results:
+        result.setdefault("risk_signals", [])
         status = result["status"]
         counts[status] = counts.get(status, 0) + 1
 

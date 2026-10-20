@@ -702,6 +702,18 @@
     "lookup_error"
   ];
 
+  const recognizedRiskSignals = [
+    "duplicate_in_file",
+    "historical_identifier_match"
+  ];
+
+  function validRiskSignals(signals) {
+    return Array.isArray(signals) && signals.every((signal) =>
+      typeof signal === "string" &&
+      recognizedRiskSignals.includes(signal)
+    );
+  }
+
   function validHistoricalMatches(matches) {
     return Array.isArray(matches) && matches.every((match) =>
       match &&
@@ -742,6 +754,19 @@
     addHistoryDetail(article, "Observed currency", item.observed_currency);
     addHistoryDetail(article, "Result", item.summary);
     addHistoryDetail(article, "Settlement verified", "No");
+
+    if (Array.isArray(item.risk_signals) && item.risk_signals.length > 0) {
+      addHistoryDetail(
+        article,
+        "Risk signals",
+        item.risk_signals.map((signal) => signal.replaceAll("_", " ")).join(", ")
+      );
+      addHistoryDetail(
+        article,
+        "Informational check",
+        "Risk signals are informational and do not independently establish fraud or change reconciliation status."
+      );
+    }
 
     if (Array.isArray(item.historical_matches)) {
       const heading = document.createElement("h4");
@@ -1026,6 +1051,8 @@
           typeof item.paypal_order_id !== "string" ||
           !reconciliationStatuses.includes(item.status) ||
           item.settlement_verified !== false ||
+          (item.risk_signals !== undefined &&
+            !validRiskSignals(item.risk_signals)) ||
           (item.historical_matches !== undefined &&
             !validHistoricalMatches(item.historical_matches))
         ) {

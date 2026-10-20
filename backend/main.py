@@ -200,6 +200,9 @@ async def reconcile_merchant_csv(
                 merchant_reference=row["merchant_reference"],
                 paypal_order_id=row["paypal_order_id"],
             )
+            if row["historical_matches"]:
+                if "historical_identifier_match" not in row["risk_signals"]:
+                    row["risk_signals"].append("historical_identifier_match")
 
         result["run_id"] = repository.save_run(result)
     except (sqlite3.Error, OSError) as exc:

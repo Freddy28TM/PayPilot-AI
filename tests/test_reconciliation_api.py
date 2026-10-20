@@ -132,6 +132,11 @@ def test_duplicate_order_ids_are_flagged_without_paypal_lookup(
     assert body["count"] == 2
     assert body["counts"] == {"needs_review": 2}
     assert all(row["status"] == "needs_review" for row in body["results"])
+    assert all(
+        row["risk_signals"] == ["duplicate_in_file"]
+        for row in body["results"]
+    )
+    assert body["settlement_verified"] is False
     assert fake_paypal.requested_ids == []
 
 
@@ -155,7 +160,12 @@ def test_duplicate_merchant_references_are_flagged(
     )
 
     assert response.status_code == 200
-    assert response.json()["counts"] == {"needs_review": 2}
+    body = response.json()
+    assert body["counts"] == {"needs_review": 2}
+    assert all(
+        row["risk_signals"] == ["duplicate_in_file"]
+        for row in body["results"]
+    )
     assert fake_paypal.requested_ids == []
 
 
@@ -282,6 +292,7 @@ def test_first_reconciliation_has_no_historical_matches(reconciliation_client):
     assert response.status_code == 200
     body = response.json()
     assert body["results"][0]["historical_matches"] == []
+    assert body["results"][0]["risk_signals"] == []
     assert body["counts"] == {"matched": 1}
     assert body["results"][0]["status"] == "matched"
     assert body["settlement_verified"] is False
@@ -315,6 +326,7 @@ def test_cross_run_matches_are_informational_and_do_not_change_counts(
     second_row = second_body["results"][0]
 
     assert second_row["status"] == "matched"
+    assert second_row["risk_signals"] == ["historical_identifier_match"]
     assert second_body["counts"] == {"matched": 1}
     assert second_row["settlement_verified"] is False
     assert second_body["settlement_verified"] is False
@@ -335,6 +347,7 @@ def test_cross_run_matches_are_informational_and_do_not_change_counts(
     third_row = third.json()["results"][0]
 
     assert third_row["status"] == "matched"
+    assert third_row["risk_signals"] == ["historical_identifier_match"]
     assert third.json()["counts"] == {"matched": 1}
     assert third_row["settlement_verified"] is False
     assert [
@@ -394,6 +407,7 @@ def test_conflicting_historical_identifiers_are_informational(
     row = body["results"][0]
 
     assert row["status"] == "matched"
+    assert row["risk_signals"] == ["historical_identifier_match"]
     assert body["counts"] == {"matched": 1}
     assert row["settlement_verified"] is False
     assert body["settlement_verified"] is False

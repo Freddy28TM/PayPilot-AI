@@ -233,6 +233,59 @@ test("historical matches render as informational text", async () => {
   assert.match(elements["reconciliation-counts"].textContent, /Settlement verified: No/);
 });
 
+
+test("recognized risk signals render as informational text", async () => {
+  const payload = validPayload([
+    result({
+      risk_signals: [
+        "duplicate_in_file",
+        "historical_identifier_match",
+      ],
+    }),
+  ]);
+
+  const { elements } = await startHarness(response(payload));
+  attachFile(elements);
+  await submit(elements);
+
+  const article = elements["reconciliation-result-list"].children[0];
+  assert.match(article.textContent, /Risk signals/i);
+  assert.match(article.textContent, /duplicate in file/i);
+  assert.match(article.textContent, /historical identifier match/i);
+  assert.match(article.textContent, /informational/i);
+  assert.equal(article.children.some((child) => child.tagName === "img"), false);
+  assert.equal(elements["reconciliation-results"].hidden, false);
+  assert.match(elements["reconciliation-counts"].textContent, /matched: 1/);
+  assert.match(elements["reconciliation-counts"].textContent, /Settlement verified: No/);
+});
+
+test("unsupported or malformed risk signals are rejected", async (t) => {
+  const invalidSignals = [
+    "duplicate_in_file",
+    ["unknown_signal"],
+    ["duplicate_in_file", "unknown_signal"],
+    [null],
+    [{}],
+  ];
+
+  for (const risk_signals of invalidSignals) {
+    await t.test(JSON.stringify(risk_signals), async () => {
+      const { elements } = await startHarness(
+        response(validPayload([result({ risk_signals })]))
+      );
+      attachFile(elements);
+      await submit(elements);
+
+      assert.match(
+        elements["reconciliation-message"].textContent,
+        /invalid reconciliation record/
+      );
+      assert.equal(elements["reconciliation-results"].hidden, true);
+      assert.equal(elements["reconciliation-result-list"].children.length, 0);
+    });
+  }
+});
+
 test("malformed historical matches are rejected", async (t) => {
   const invalidMatches = [
     "not-an-array",
