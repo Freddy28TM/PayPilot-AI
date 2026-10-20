@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.config import get_settings
-from backend.database import InvestigationRepository
+from backend.database import InvestigationRepository, ReconciliationRepository
 from backend.evidence import (
     assess_capture_evidence,
     classify_order_evidence,
@@ -68,6 +68,19 @@ def get_investigation_repository() -> InvestigationRepository:
     return repository
 
 
+def get_reconciliation_repository() -> ReconciliationRepository:
+    """Create and initialize the local reconciliation history repository."""
+    repository = ReconciliationRepository()
+    try:
+        repository.initialize()
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation history is temporarily unavailable.",
+        ) from exc
+    return repository
+
+
 class ReconciliationRequest(BaseModel):
     """Strict JSON request for merchant CSV reconciliation."""
 
@@ -119,6 +132,9 @@ def list_investigation_history(
 async def reconcile_merchant_csv(
     request: Request,
     paypal: Annotated[PayPalClient, Depends(get_paypal_client)],
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
 ) -> dict[str, object]:
     """Compare merchant CSV records with PayPal Sandbox orders."""
     max_request_bytes = (MAX_CSV_BYTES * 2) + 4096
@@ -174,9 +190,63 @@ async def reconcile_merchant_csv(
         )
 
     try:
-        return reconcile_csv(validated.csv_text, paypal)
+        result = reconcile_csv(validated.csv_text, paypal)
     except ReconciliationInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        result["run_id"] = repository.save_run(result)
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation history is temporarily unavailable.",
+        ) from exc
+
+    return result
+
+
+@app.get("/api/reconciliation/runs")
+def list_reconciliation_runs(
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> dict[str, object]:
+    """List saved reconciliation runs without contacting PayPal."""
+    try:
+        runs = repository.list_runs(limit=limit)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation history is temporarily unavailable.",
+        ) from exc
+
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/reconciliation/runs/{run_id}")
+def retrieve_reconciliation_run(
+    run_id: Annotated[int, Path(ge=1)],
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
+) -> dict[str, object]:
+    """Retrieve a saved reconciliation run without contacting PayPal."""
+    try:
+        run = repository.get_run(run_id)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation history is temporarily unavailable.",
+        ) from exc
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Reconciliation run was not found.",
+        )
+
+    return run
 
 
 @app.get("/api/paypal/orders/{order_id}")

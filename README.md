@@ -49,9 +49,28 @@ credentials and test data only.
 | GET | `/health` | Checks API availability |
 | GET | `/api/paypal/orders/{order_id}` | Retrieves a PayPal Sandbox order |
 | GET | `/api/paypal/orders/{order_id}/investigation` | Returns selected evidence, deterministic assessments, and an explanation |
+| POST | `/api/reconciliation` | Compares uploaded CSV records with PayPal Sandbox order evidence and saves the run |
+| GET | `/api/reconciliation/runs?limit=50` | Lists saved reconciliation runs (limit: 1–500, default: 50) |
+| GET | `/api/reconciliation/runs/{run_id}` | Retrieves one saved reconciliation run and its results |
 
-The investigation endpoint is read-only. An order marked completed is not,
-by itself, proof that settlement has been verified.
+Investigation and reconciliation endpoints are read-only. Reconciliation history
+lets you review saved comparisons without repeating PayPal lookups. The default
+database is stored at `data/paypilot.sqlite3`; tests use temporary databases.
+
+A matching order amount and currency, or an order marked completed, is not
+proof that payment settlement has been verified. Reconciliation results
+explicitly keep `settlement_verified` false. This prototype does not capture,
+refund, or move money.
+
+### Reconciliation workflow
+
+1. Open the web interface and submit a CSV file for reconciliation.
+2. Review the comparison results and their statuses.
+3. Use **Saved reconciliation runs** to refresh the history and open a prior run.
+4. Treat results as comparison evidence only; settlement remains unverified.
+
+Use PayPal Sandbox credentials and test data only. This development prototype
+is not production-ready.
 
 ## Tests
 

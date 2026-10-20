@@ -1,14 +1,17 @@
 """Integration tests for the merchant reconciliation API."""
 
 import asyncio
+import sqlite3
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from backend.database import ReconciliationRepository
 from backend.main import (
     app,
     get_paypal_client,
+    get_reconciliation_repository,
     reconcile_merchant_csv,
 )
 from backend.paypal_client import PayPalAPIError
@@ -40,15 +43,22 @@ class FakePayPalClient:
 
 
 @pytest.fixture
-def reconciliation_client():
+def reconciliation_client(tmp_path):
     fake_paypal = FakePayPalClient()
+    repository = ReconciliationRepository(
+        database_path=tmp_path / "reconciliation-test.sqlite3"
+    )
+    repository.initialize()
+
     app.dependency_overrides[get_paypal_client] = lambda: fake_paypal
+    app.dependency_overrides[get_reconciliation_repository] = lambda: repository
 
     try:
         with TestClient(app) as client:
             yield client, fake_paypal
     finally:
         app.dependency_overrides.pop(get_paypal_client, None)
+        app.dependency_overrides.pop(get_reconciliation_repository, None)
 
 
 def csv_body(rows):
@@ -247,9 +257,130 @@ def test_oversized_stream_without_content_length_is_rejected():
     request = StreamingRequest()
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(reconcile_merchant_csv(request, FakePayPalClient()))
+        asyncio.run(
+            reconcile_merchant_csv(
+                request,
+                FakePayPalClient(),
+                ReconciliationRepository(),
+            )
+        )
 
     assert exc_info.value.status_code == 413
     assert request.chunks_yielded == (
         max_request_bytes // chunk_size
     ) + 1
+
+def test_successful_run_can_be_listed_and_retrieved_without_paypal_calls(
+    reconciliation_client,
+):
+    client, fake_paypal = reconciliation_client
+
+    response = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-HISTORY,ORDER-1,25.00,USD\n"),
+    )
+    assert response.status_code == 200
+    saved = response.json()
+    run_id = saved["run_id"]
+    calls_after_reconciliation = list(fake_paypal.requested_ids)
+
+    history_response = client.get("/api/reconciliation/runs")
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert history["count"] == 1
+    assert history["runs"][0]["run_id"] == run_id
+    assert history["runs"][0]["settlement_verified"] is False
+
+    detail_response = client.get(f"/api/reconciliation/runs/{run_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["run_id"] == run_id
+    assert detail["record_count"] == 1
+    assert detail["results"][0]["merchant_reference"] == "INV-HISTORY"
+    assert detail["results"][0]["status"] == "matched"
+    assert detail["settlement_verified"] is False
+    assert detail["results"][0]["settlement_verified"] is False
+    assert fake_paypal.requested_ids == calls_after_reconciliation
+
+
+def test_unknown_reconciliation_run_returns_404(reconciliation_client):
+    client, fake_paypal = reconciliation_client
+
+    response = client.get("/api/reconciliation/runs/99999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Reconciliation run was not found."
+    assert fake_paypal.requested_ids == []
+
+
+def test_reconciliation_history_limit_is_validated(reconciliation_client):
+    client, _ = reconciliation_client
+
+    assert client.get("/api/reconciliation/runs?limit=0").status_code == 422
+    assert client.get("/api/reconciliation/runs?limit=501").status_code == 422
+
+class BrokenReconciliationRepository:
+    """Simulate storage failures without touching a real database."""
+
+    def save_run(self, result):
+        raise sqlite3.OperationalError("private database path")
+
+    def list_runs(self, limit=50):
+        raise sqlite3.OperationalError("private database path")
+
+    def get_run(self, run_id):
+        raise sqlite3.OperationalError("private database path")
+
+
+def test_reconciliation_storage_failures_return_safe_503(
+    reconciliation_client,
+):
+    client, _ = reconciliation_client
+    app.dependency_overrides[get_reconciliation_repository] = (
+        lambda: BrokenReconciliationRepository()
+    )
+
+    response = client.post(
+        "/api/reconciliation",
+        json=csv_body("INV-FAIL,ORDER-1,25.00,USD\n"),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Reconciliation history is temporarily unavailable."
+    )
+    assert "private database path" not in response.text
+
+
+def test_listing_history_storage_failure_returns_safe_503(
+    reconciliation_client,
+):
+    client, _ = reconciliation_client
+    app.dependency_overrides[get_reconciliation_repository] = (
+        lambda: BrokenReconciliationRepository()
+    )
+
+    response = client.get("/api/reconciliation/runs")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Reconciliation history is temporarily unavailable."
+    )
+    assert "private database path" not in response.text
+
+
+def test_retrieving_history_storage_failure_returns_safe_503(
+    reconciliation_client,
+):
+    client, _ = reconciliation_client
+    app.dependency_overrides[get_reconciliation_repository] = (
+        lambda: BrokenReconciliationRepository()
+    )
+
+    response = client.get("/api/reconciliation/runs/1")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Reconciliation history is temporarily unavailable."
+    )
+    assert "private database path" not in response.text

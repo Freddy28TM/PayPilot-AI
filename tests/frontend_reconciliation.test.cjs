@@ -293,3 +293,74 @@ test("record with unsupported status or settlement claim is rejected", async (t)
     });
   }
 });
+
+test("saved reconciliation runs can be loaded and viewed", async () => {
+  const savedRun = {
+    run_id: 7,
+    created_at: "2026-10-20T10:00:00+00:00",
+    record_count: 1,
+    counts: { matched: 1 },
+    settlement_verified: false,
+  };
+  const savedDetail = {
+    ...savedRun,
+    results: [result()],
+  };
+
+  const harness = createHarness([
+    response({ investigations: [] }),
+    response({ runs: [savedRun], count: 1 }),
+    response(savedDetail),
+  ]);
+  const { elements, requests } = harness;
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const refresh = elements["refresh-saved-runs"].listeners.click;
+  assert.equal(typeof refresh, "function", "refresh handler must be registered");
+  await refresh();
+
+  assert.equal(requests[1][0], "/api/reconciliation/runs?limit=50");
+  assert.match(elements["saved-runs-message"].textContent, /Showing 1 saved run/);
+  assert.match(elements["saved-runs-list"].textContent, /Run 7/);
+  assert.match(elements["saved-runs-list"].textContent, /Settlement verified: No/);
+
+  const article = elements["saved-runs-list"].children[0];
+  const viewButton = article.children.find(
+    (child) => child.textContent === "View results"
+  );
+  assert.ok(viewButton, "saved run should have a View results button");
+
+  await viewButton.listeners.click();
+
+  assert.equal(requests[2][0], "/api/reconciliation/runs/7");
+  assert.equal(elements["reconciliation-results"].hidden, false);
+  assert.equal(elements["reconciliation-result-list"].children.length, 1);
+  assert.match(elements["reconciliation-counts"].textContent, /Saved run: 7/);
+  assert.match(elements["reconciliation-counts"].textContent, /Settlement verified: No/);
+  assert.match(elements["saved-runs-message"].textContent, /Loaded saved run 7/);
+});
+
+test("invalid saved reconciliation history is rejected", async () => {
+  const harness = createHarness([
+    response({ investigations: [] }),
+    response({
+      runs: [{
+        run_id: 7,
+        created_at: "2026-10-20T10:00:00+00:00",
+        record_count: 1,
+        counts: { matched: 1 },
+        settlement_verified: true,
+      }],
+      count: 1,
+    }),
+  ]);
+  const { elements, requests } = harness;
+
+  await new Promise((resolve) => setImmediate(resolve));
+  await elements["refresh-saved-runs"].listeners.click();
+
+  assert.equal(requests[1][0], "/api/reconciliation/runs?limit=50");
+  assert.match(elements["saved-runs-message"].textContent, /invalid saved reconciliation history/i);
+  assert.equal(elements["saved-runs-list"].children.length, 0);
+});

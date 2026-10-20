@@ -524,7 +524,25 @@
        <div id="reconciliation-result-list" class="history-list"></div>
      </section>
    </section>
-   <section
+     <section class="panel" id="saved-reconciliation-runs"
+           aria-labelledby="saved-runs-title">
+    <div class="history-heading">
+      <div>
+        <h2 id="saved-runs-title">Saved reconciliation runs</h2>
+        <p class="subtext">Review saved results without contacting PayPal.</p>
+      </div>
+      <button id="refresh-saved-runs" type="button">Refresh saved runs</button>
+    </div>
+    <p class="history-warning">
+      Saved comparisons are historical evidence only. Settlement has not been verified.
+    </p>
+    <p id="saved-runs-message" class="message info" role="status" aria-live="polite">
+      Select Refresh saved runs to load saved reconciliation runs.
+    </p>
+    <div id="saved-runs-list" class="history-list"></div>
+  </section>
+
+<section
      class="panel"
      id="investigation-history"
       aria-labelledby="history-title"
@@ -712,6 +730,182 @@
 
     return article;
   }
+
+
+  const refreshSavedRunsButton = document.getElementById("refresh-saved-runs");
+  const savedRunsMessage = document.getElementById("saved-runs-message");
+  const savedRunsList = document.getElementById("saved-runs-list");
+
+  function setSavedRunsMessage(text, type = "info") {
+    savedRunsMessage.textContent = text;
+    savedRunsMessage.className = `message ${type}`;
+  }
+
+  function validSavedRunSummary(run) {
+    return Boolean(
+      run &&
+      typeof run === "object" &&
+      Number.isSafeInteger(run.run_id) &&
+      run.run_id > 0 &&
+      typeof run.created_at === "string" &&
+      Number.isSafeInteger(run.record_count) &&
+      run.record_count >= 0 &&
+      run.counts &&
+      typeof run.counts === "object" &&
+      !Array.isArray(run.counts) &&
+      run.settlement_verified === false
+    );
+  }
+
+  function validSavedRunDetail(run) {
+    return Boolean(
+      validSavedRunSummary(run) &&
+      Array.isArray(run.results) &&
+      run.results.length === run.record_count &&
+      run.results.every((item) =>
+        item &&
+        typeof item === "object" &&
+        typeof item.merchant_reference === "string" &&
+        typeof item.paypal_order_id === "string" &&
+        reconciliationStatuses.includes(item.status) &&
+        item.settlement_verified === false
+      )
+    );
+  }
+
+  async function viewSavedRun(runId) {
+    setSavedRunsMessage(`Loading saved run ${runId}…`);
+
+    try {
+      const response = await fetch(`/api/reconciliation/runs/${runId}`, {
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "That saved reconciliation run was not found."
+            : "Saved reconciliation results are temporarily unavailable."
+        );
+      }
+
+      if (!validSavedRunDetail(data)) {
+        throw new Error("The server returned invalid saved reconciliation results.");
+      }
+
+      const counts = Object.fromEntries(
+        reconciliationStatuses.map((status) => [status, 0])
+      );
+
+      reconciliationList.replaceChildren();
+      for (const item of data.results) {
+        counts[item.status] += 1;
+        reconciliationList.appendChild(renderReconciliationResult(item));
+      }
+
+      reconciliationCounts.textContent = [
+        `Saved run: ${data.run_id}`,
+        `Created: ${data.created_at}`,
+        `Total records: ${data.results.length}`,
+        ...reconciliationStatuses.map(
+          (status) => `${status.replaceAll("_", " ")}: ${counts[status]}`
+        ),
+        "Settlement verified: No"
+      ].join(" · ");
+
+      reconciliationResults.hidden = false;
+      setReconciliationMessage(
+        `Loaded saved run ${data.run_id}. Settlement has not been verified.`
+      );
+      setSavedRunsMessage(`Loaded saved run ${data.run_id}.`);
+    } catch (error) {
+      setSavedRunsMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved reconciliation results are temporarily unavailable.",
+        "error"
+      );
+    }
+  }
+
+  async function loadSavedRuns() {
+    refreshSavedRunsButton.disabled = true;
+    savedRunsList.replaceChildren();
+    setSavedRunsMessage("Loading saved reconciliation runs…");
+
+    try {
+      const response = await fetch("/api/reconciliation/runs?limit=50", {
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        throw new Error("Saved reconciliation history is temporarily unavailable.");
+      }
+
+      if (
+        !data ||
+        !Array.isArray(data.runs) ||
+        data.count !== data.runs.length ||
+        !data.runs.every(validSavedRunSummary)
+      ) {
+        throw new Error("The server returned invalid saved reconciliation history.");
+      }
+
+      if (data.runs.length === 0) {
+        setSavedRunsMessage("No saved reconciliation runs yet.");
+        return;
+      }
+
+      for (const run of data.runs) {
+        const article = document.createElement("article");
+        article.className = "history-item";
+
+        const heading = document.createElement("h3");
+        heading.textContent = `Run ${run.run_id}`;
+        article.appendChild(heading);
+
+        addHistoryDetail(article, "Created", run.created_at);
+        addHistoryDetail(article, "Records", run.record_count);
+        addHistoryDetail(article, "Settlement verified", "No");
+
+        const viewButton = document.createElement("button");
+        viewButton.type = "button";
+        viewButton.textContent = "View results";
+        viewButton.addEventListener("click", () => viewSavedRun(run.run_id));
+        article.appendChild(viewButton);
+
+        savedRunsList.appendChild(article);
+      }
+
+      setSavedRunsMessage(`Showing ${data.runs.length} saved run(s).`);
+    } catch (error) {
+      savedRunsList.replaceChildren();
+      setSavedRunsMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved reconciliation history is temporarily unavailable.",
+        "error"
+      );
+    } finally {
+      refreshSavedRunsButton.disabled = false;
+    }
+  }
+
+  refreshSavedRunsButton.addEventListener("click", loadSavedRuns);
 
   reconciliationForm.addEventListener("submit", async (event) => {
     event.preventDefault();
