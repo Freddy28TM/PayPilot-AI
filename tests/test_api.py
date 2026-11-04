@@ -202,6 +202,41 @@ def test_investigation_endpoint_returns_assessment(api_client):
     assert records[0]["settlement_verified"] == 0
 
 
+def test_investigation_survives_unexpected_explainer_failure(api_client):
+    client, fake_paypal = api_client
+
+    class BrokenExplainer:
+        def explain(self, evidence, assessment):
+            raise OSError("private provider connection detail")
+
+    app.dependency_overrides[get_gemini_explainer] = (
+        lambda: BrokenExplainer()
+    )
+
+    response = client.get(
+        "/api/paypal/orders/TEST-ORDER/investigation"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assessment"]["classification"] == (
+        "completed_settlement_unverified"
+    )
+    assert body["assessment"]["settlement_verified"] is False
+    assert body["explanation"] == {
+        "status": "fallback",
+        "explanation": body["assessment"]["summary"],
+    }
+    assert "private provider connection detail" not in response.text
+
+    records = fake_paypal.repository.list_investigations()
+    assert len(records) == 1
+    assert records[0]["classification"] == (
+        "completed_settlement_unverified"
+    )
+    assert records[0]["settlement_verified"] == 0
+
+
 def test_investigation_endpoint_maps_unknown_order_to_404(api_client):
     client, fake_paypal = api_client
     fake_paypal.error = PayPalAPIError(404, "safe test error")

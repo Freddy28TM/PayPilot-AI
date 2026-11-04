@@ -7,10 +7,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from backend.database import ReconciliationRepository
+from backend.database import InvestigationRepository, ReconciliationRepository
 from backend.main import (
     app,
     get_paypal_client,
+    get_investigation_repository,
     get_reconciliation_repository,
     reconcile_merchant_csv,
 )
@@ -50,8 +51,16 @@ def reconciliation_client(tmp_path):
     )
     repository.initialize()
 
+    investigation_repository = InvestigationRepository(
+        database_path=tmp_path / "investigation-test.sqlite3"
+    )
+    investigation_repository.initialize()
+
     app.dependency_overrides[get_paypal_client] = lambda: fake_paypal
     app.dependency_overrides[get_reconciliation_repository] = lambda: repository
+    app.dependency_overrides[get_investigation_repository] = (
+        lambda: investigation_repository
+    )
 
     try:
         with TestClient(app) as client:
@@ -59,6 +68,7 @@ def reconciliation_client(tmp_path):
     finally:
         app.dependency_overrides.pop(get_paypal_client, None)
         app.dependency_overrides.pop(get_reconciliation_repository, None)
+        app.dependency_overrides.pop(get_investigation_repository, None)
 
 
 def csv_body(rows):
@@ -687,6 +697,40 @@ def test_investigation_analytics_api_returns_empty_history(
     assert body["total_investigations"] == 0
     assert body["classification_counts"] == {}
     assert body["settlement_verified"] is False
+    assert fake_paypal.requested_ids == []
+
+
+
+def test_investigation_analytics_api_counts_saved_history(reconciliation_client):
+    client, fake_paypal = reconciliation_client
+    repository = app.dependency_overrides[get_investigation_repository]()
+
+    repository.save_investigation(
+        {"id": "ORDER-HISTORY-1", "status": "CREATED"},
+        {
+            "classification": "order_created",
+            "settlement_verified": False,
+        },
+    )
+    repository.save_investigation(
+        {"id": "ORDER-HISTORY-2", "status": "APPROVED"},
+        {
+            "classification": "order_approved_not_completed",
+            "settlement_verified": False,
+        },
+    )
+
+    response = client.get("/api/analytics/investigations")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total_investigations": 2,
+        "classification_counts": {
+            "order_created": 1,
+            "order_approved_not_completed": 1,
+        },
+        "settlement_verified": False,
+    }
     assert fake_paypal.requested_ids == []
 
 

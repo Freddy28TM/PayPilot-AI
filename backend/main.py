@@ -299,7 +299,7 @@ def get_analytics_trends(
 @app.get("/api/analytics/investigations")
 def get_investigation_analytics(
     repository: Annotated[
-        ReconciliationRepository, Depends(get_reconciliation_repository)
+        InvestigationRepository, Depends(get_investigation_repository)
     ],
 ) -> dict[str, object]:
     """Summarize saved PayPal investigations without contacting PayPal."""
@@ -408,7 +408,15 @@ def investigate_paypal_order(
         ) from exc
 
     capture_assessment = assess_capture_evidence(order)
-    explanation = explainer.explain(order, assessment)
+    try:
+        explanation = explainer.explain(order, assessment)
+    except Exception:
+        # AI explanations are optional; deterministic findings remain authoritative.
+        explanation = {
+            "status": "fallback",
+            "explanation": assessment.get("summary")
+            or "The order was assessed using deterministic evidence.",
+        }
 
     return {
         "evidence": evidence,
