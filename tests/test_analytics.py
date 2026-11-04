@@ -210,3 +210,49 @@ def test_summary_closes_read_only_database_connection(setup_analytics):
     assert len(connections) == 1
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connections[0].execute("SELECT 1")
+
+
+def test_investigation_summary_counts_saved_investigations(setup_analytics):
+    """Analytics must be able to report saved PayPal investigations.
+
+    investigation_history is a separate operational record from
+    reconciliation runs. The handover requires that these not be
+    conflated; this test pins that analytics can count investigations
+    at all, without implying settlement was verified.
+    """
+    from backend.database import InvestigationRepository
+
+    _, analytics, database_path = setup_analytics
+    inv_repo = InvestigationRepository(database_path)
+    inv_repo.initialize()
+
+    inv_repo.save_investigation(
+        {"id": "ORDER-A", "status": "COMPLETED"},
+        {
+            "classification": "completed_settlement_unverified",
+            "settlement_verified": False,
+        },
+    )
+    inv_repo.save_investigation(
+        {"id": "ORDER-B", "status": "APPROVED"},
+        {
+            "classification": "order_approved_not_completed",
+            "settlement_verified": False,
+        },
+    )
+    inv_repo.save_investigation(
+        {"id": "ORDER-A", "status": "COMPLETED"},
+        {
+            "classification": "completed_settlement_unverified",
+            "settlement_verified": False,
+        },
+    )
+
+    result = analytics.investigation_summary()
+
+    assert result["total_investigations"] == 3
+    assert result["classification_counts"] == {
+        "completed_settlement_unverified": 2,
+        "order_approved_not_completed": 1,
+    }
+    assert result["settlement_verified"] is False

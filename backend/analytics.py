@@ -140,3 +140,33 @@ class ReconciliationAnalytics:
             "limit": limit,
             "settlement_verified": False,
         }
+
+    def investigation_summary(self) -> dict:
+        """Return totals over saved PayPal investigations.
+
+        Reads investigation_history only. Never claims settlement: the
+        schema enforces settlement_verified = 0, and this method echoes
+        that as False regardless of classification strings.
+        """
+        with closing(self._connect_read_only()) as connection:
+            total = connection.execute(
+                "SELECT COUNT(*) FROM investigation_history"
+            ).fetchone()[0]
+
+            rows = connection.execute(
+                """
+                SELECT classification, COUNT(*) AS row_count
+                FROM investigation_history
+                GROUP BY classification
+                """
+            ).fetchall()
+
+        classification_counts: dict[str, int] = {}
+        for row in rows:
+            classification_counts[row["classification"]] = row["row_count"]
+
+        return {
+            "total_investigations": total,
+            "classification_counts": classification_counts,
+            "settlement_verified": False,
+        }
