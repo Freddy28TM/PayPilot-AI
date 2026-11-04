@@ -52,25 +52,79 @@ credentials and test data only.
 | POST | `/api/reconciliation` | Compares uploaded CSV records with PayPal Sandbox order evidence and saves the run |
 | GET | `/api/reconciliation/runs?limit=50` | Lists saved reconciliation runs (limit: 1–500, default: 50) |
 | GET | `/api/reconciliation/runs/{run_id}` | Retrieves one saved reconciliation run and its results |
+| GET | `/api/analytics/summary` | Summarizes all saved reconciliation runs, status counts, record-match rate, record-count consistency, and risk-signal history availability |
+| GET | `/api/analytics/trends?limit=30` | Returns daily reconciliation aggregates; `limit` is 1–365 and defaults to 30 |
 
 Investigation and reconciliation endpoints are read-only. Reconciliation history
 lets you review saved comparisons without repeating PayPal lookups. The default
 database is stored at `data/paypilot.sqlite3`; tests use temporary databases.
+
+### Reconciliation analytics
+
+The analytics endpoints summarize persisted reconciliation history and do not
+contact PayPal. The summary includes saved-run and row totals, counts by
+reconciliation status, exception rows, record-match rate, record-count
+consistency, the latest saved run, and whether risk-signal history is available.
+
+The trends endpoint returns daily aggregates for the most recent days that
+contain saved runs. Its `limit` query parameter accepts integers from 1 to
+365 and defaults to 30.
+
+The record-match rate is the percentage of saved rows with status `matched`.
+It measures agreement with the available order evidence, not payment settlement.
+Both analytics endpoints explicitly return `settlement_verified: false`.
 
 A matching order amount and currency, or an order marked completed, is not
 proof that payment settlement has been verified. Reconciliation results
 explicitly keep `settlement_verified` false. This prototype does not capture,
 refund, or move money.
 
+### Duplicate detection and risk signals
+
+PayPilot AI identifies duplicate records within an uploaded reconciliation CSV and flags identifiers that match records from previous reconciliation runs.
+
+Supported risk signals include:
+
+- **Duplicate in file:** A merchant reference or PayPal order ID is repeated within the uploaded file. Duplicate rows are flagged for review rather than treated as independent confirmed payment records.
+- **Historical identifier match:** An identifier matches a record found in an earlier reconciliation run. Review the earlier result and available evidence before drawing conclusions.
+
+Risk signals are informational. A duplicate or historical identifier match does not, by itself, establish fraud, prove that a payment was attempted more than once, or confirm that money was received.
+
+PayPal remains the source of truth for payment status. Reconciliation results and risk signals are evidence for human review, and `settlement_verified` remains `false`.
+
 ### Reconciliation workflow
 
-1. Open the web interface and submit a CSV file for reconciliation.
-2. Review the comparison results and their statuses.
-3. Use **Saved reconciliation runs** to refresh the history and open a prior run.
-4. Treat results as comparison evidence only; settlement remains unverified.
+**Sandbox-only warning:** Before uploading a CSV, confirm that PayPilot is
+configured with PayPal Sandbox credentials and use test data only. Do not use
+production credentials or real customer payment data. This prototype is not
+production-ready.
 
-Use PayPal Sandbox credentials and test data only. This development prototype
-is not production-ready.
+1. Open the web interface and upload a CSV file for reconciliation.
+2. Review matching records, mismatches, duplicate records, and associated risk signals.
+3. Examine the evidence and explanations before deciding what requires further investigation.
+4. Use **Saved reconciliation runs** to review previous comparisons and investigate historical identifier matches.
+5. Treat all results as comparison evidence; settlement remains unverified.
+
+## Security and release limitations
+
+PayPilot AI is a local development prototype, not a production payment
+operations service.
+
+- The application currently has no application-level login or authorization
+  protecting its API routes. Do not expose it to the public internet or an
+  untrusted network.
+- Use PayPal Sandbox credentials and synthetic test data only. The Sandbox
+  configuration check is not a substitute for a production security review.
+- Keep `.env` local and never commit or share API credentials.
+- Before any production deployment, implement and test appropriate
+  authentication, role-based authorization, secret management, secure
+  deployment configuration, audit logging, and operational monitoring.
+- Review privacy, data-retention, backup, and recovery requirements before
+  storing real customer or payment-related information.
+- Automated tests and security scans provide useful evidence but do not
+  establish production readiness. The vulnerability audit currently checks
+  the listed pinned packages with dependency resolution disabled, so
+  transitive dependencies require a separate complete audit.
 
 ## Tests
 
@@ -81,5 +135,15 @@ activated:
 python -m pytest -q
 ```
 The tests cover configuration, PayPal client behavior, evidence assessment,
-AI explanation behavior, and API routes. Tests use controlled fixtures and
-mocks where external services are involved.
+AI explanation behavior, API routes, reconciliation history, risk signals, and
+analytics. Tests use controlled fixtures and mocks where external services
+are involved.
+
+Run the frontend tests with Node.js 20 or a compatible version:
+
+```bash
+node --test tests/frontend_reconciliation.test.cjs
+node --test tests/frontend_history.test.cjs
+```
+
+The frontend tests use Node.js's built-in test runner; npm is not required.

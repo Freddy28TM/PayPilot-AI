@@ -1,16 +1,28 @@
-.env
-.env.*
-!.env.example
-.venv/
+# Local backup/rollback artifacts — preserved on disk, never committed
+*.before-*
+*.bak-*
+*.bak
+*.pre-*
+*.backup-*
+*.stage3-pre-*
+*.pre-integration-*
+*.pre-reconciliation-*
+*.pre-sparse-*
+*.pre-validation-*
+*.pre-history-*
+*.pre-init-*
+*.pre-reconciliation-api-*
+*.pre-ruff-*
+*.pre-bounded-*
+*.pre-approval-*
+*.pre-auth-*
+*.pre-bool-*
+*.pre-eof-*
+*.pre-expiry-*
+*.pre-sim*
+*.pre-count-*
+*.pre-conflict-*
+# Python caches
 __pycache__/
-*.py[cod]
+*.pyc
 .pytest_cache/
-node_modules/
-dist/
-build/
-*.sqlite3
-
-# Local recovery copies; do not publish backups
-*.bak*
-*.backup*
-*~

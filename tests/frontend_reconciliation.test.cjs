@@ -19,6 +19,7 @@ class MockNode {
     this.tagName = tagName;
     this.children = [];
     this.className = "";
+    this.style = {};
     this.disabled = false;
     this.hidden = false;
     this.value = "";
@@ -55,11 +56,22 @@ class MockNode {
     this.append(...nodes);
   }
 
+  setAttribute(name, value) {
+    if (!this.attributes) {
+      this.attributes = {};
+    }
+    this.attributes[name] = String(value);
+  }
+
   addEventListener(name, callback) {
     this.listeners[name] = callback;
   }
 
   focus() {}
+
+  scrollIntoView(options) {
+    this.scrollIntoViewOptions = options;
+  }
 }
 
 function response(body, { ok = true, status = 200, jsonError = false } = {}) {
@@ -161,6 +173,107 @@ async function submit(elements) {
   assert.equal(typeof handler, "function", "submit handler must be registered");
   await handler({ preventDefault() {} });
 }
+
+
+test("analytics dashboard loads validated summary and daily trends", async () => {
+  const summary = {
+    total_runs: 2,
+    total_rows: 5,
+    recorded_rows: 5,
+    record_count_consistent: true,
+    status_counts: {
+      matched: 3,
+      amount_mismatch: 1,
+      currency_mismatch: 0,
+      needs_review: 1,
+      order_not_found: 0,
+      lookup_error: 0
+    },
+    matched_rows: 3,
+    exception_rows: 2,
+    match_rate_percent: 60,
+    latest_run_at: "2026-10-20T10:00:00+00:00",
+    settlement_verified: false,
+    risk_signal_history_available: true
+  };
+  const trends = {
+    count: 1,
+    limit: 30,
+    settlement_verified: false,
+    days: [{
+      day: "2026-10-20",
+      total_runs: 2,
+      total_rows: 5,
+      matched_rows: 3,
+      exception_rows: 2,
+      needs_review_rows: 1,
+      amount_mismatch_rows: 1,
+      currency_mismatch_rows: 0,
+      lookup_failure_rows: 0
+    }]
+  };
+
+  const harness = createHarness([
+    response({ investigations: [] }),
+    response(summary),
+    response(trends)
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const button = harness.elements["refresh-analytics"];
+  await button.listeners.click();
+
+  assert.equal(harness.requests[1][0], "/api/analytics/summary");
+  assert.equal(harness.requests[2][0], "/api/analytics/trends?limit=30");
+  assert.match(harness.elements["analytics-metrics"].textContent, /Saved runs2/);
+  assert.match(harness.elements["analytics-metrics"].textContent, /Match rate60%/);
+  assert.match(harness.elements["analytics-metrics"].textContent, /Risk-signal historyAvailable/);
+  assert.match(harness.elements["analytics-trends"].textContent, /2026-10-20/);
+  assert.match(harness.elements["analytics-trends"].textContent, /Needs review: 1/);
+  assert.match(harness.elements["analytics-message"].textContent, /Settlement verified: No/);
+  assert.equal(button.disabled, false);
+});
+
+test("analytics dashboard rejects settlement claims and malformed summaries", async () => {
+  const harness = createHarness([
+    response({ investigations: [] }),
+    response({
+      total_runs: 1,
+      total_rows: 1,
+      recorded_rows: 1,
+      record_count_consistent: true,
+      status_counts: {},
+      matched_rows: 1,
+      exception_rows: 0,
+      match_rate_percent: 100,
+      latest_run_at: null,
+      settlement_verified: true,
+      risk_signal_history_available: false
+    })
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await harness.elements["refresh-analytics"].listeners.click();
+
+  assert.match(harness.elements["analytics-message"].textContent, /unavailable or invalid/);
+  assert.equal(harness.elements["analytics-metrics"].children.length, 0);
+  assert.equal(harness.requests.length, 2);
+  assert.equal(harness.elements["refresh-analytics"].disabled, false);
+});
+
+test("analytics dashboard displays a safe error when the summary request fails", async () => {
+  const harness = createHarness([
+    response({ investigations: [] }),
+    response({ detail: "internal database path" }, { ok: false, status: 503 })
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await harness.elements["refresh-analytics"].listeners.click();
+
+  assert.match(harness.elements["analytics-message"].textContent, /unavailable or invalid/);
+  assert.doesNotMatch(harness.elements["analytics-message"].textContent, /internal database path/);
+  assert.equal(harness.elements["refresh-analytics"].disabled, false);
+});
 
 test("successful reconciliation renders results and sends CSV text", async () => {
   const payload = validPayload([
@@ -471,6 +584,10 @@ test("saved reconciliation runs can be loaded and viewed", async () => {
 
   assert.equal(requests[2][0], "/api/reconciliation/runs/7");
   assert.equal(elements["reconciliation-results"].hidden, false);
+  assert.deepEqual(
+    { ...elements["reconciliation-results"].scrollIntoViewOptions },
+    { behavior: "smooth", block: "start" }
+  );
   assert.equal(elements["reconciliation-result-list"].children.length, 1);
   assert.match(elements["reconciliation-counts"].textContent, /Saved run: 7/);
   assert.match(elements["reconciliation-counts"].textContent, /Settlement verified: No/);

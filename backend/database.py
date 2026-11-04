@@ -136,6 +136,11 @@ ALLOWED_RECONCILIATION_STATUSES = frozenset({
     "lookup_error",
 })
 
+ALLOWED_RISK_SIGNALS = frozenset({
+    "duplicate_in_file",
+    "historical_identifier_match",
+})
+
 
 class ReconciliationRepository:
     """Persist minimal, immutable snapshots of reconciliation runs."""
@@ -178,11 +183,26 @@ class ReconciliationRepository:
                         )
                     ),
                     summary TEXT NOT NULL,
+                    risk_signals_json TEXT NOT NULL DEFAULT '[]',
                     settlement_verified INTEGER NOT NULL
                         CHECK (settlement_verified = 0),
                     UNIQUE (run_id, row_number)
                 )
             """)
+
+            # Upgrade existing databases without dropping their history.
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(reconciliation_run_items)"
+                )
+            }
+            if "risk_signals_json" not in columns:
+                connection.execute("""
+                    ALTER TABLE reconciliation_run_items
+                    ADD COLUMN risk_signals_json TEXT NOT NULL DEFAULT '[]'
+                """)
+
             connection.execute("""
                 CREATE INDEX IF NOT EXISTS idx_reconciliation_runs_created
                 ON reconciliation_runs(id DESC)
@@ -254,6 +274,18 @@ class ReconciliationRepository:
                 ):
                     raise ValueError(f"Invalid reconciliation field: {field}.")
 
+            risk_signals = row.get("risk_signals", [])
+            if (
+                not isinstance(risk_signals, list)
+                or any(
+                    not isinstance(signal, str)
+                    or signal not in ALLOWED_RISK_SIGNALS
+                    for signal in risk_signals
+                )
+                or len(risk_signals) != len(set(risk_signals))
+            ):
+                raise ValueError("Invalid reconciliation risk signals.")
+
             clean_rows.append((
                 row_number,
                 self._required_text(
@@ -268,6 +300,7 @@ class ReconciliationRepository:
                 observed_currency,
                 status,
                 self._required_text(row.get("summary"), "summary", 1000),
+                json.dumps(risk_signals),
             ))
             status_counts[status] += 1
 
@@ -316,8 +349,9 @@ class ReconciliationRepository:
                 INSERT INTO reconciliation_run_items (
                     run_id, row_number, merchant_reference, paypal_order_id,
                     expected_amount, expected_currency, observed_amount,
-                    observed_currency, status, summary, settlement_verified
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    observed_currency, status, summary, risk_signals_json,
+                    settlement_verified
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 [(run_id, *row) for row in clean_rows],
             )
@@ -426,7 +460,7 @@ class ReconciliationRepository:
                 """
                 SELECT row_number, merchant_reference, paypal_order_id,
                        expected_amount, expected_currency, observed_amount,
-                       observed_currency, status, summary
+                       observed_currency, status, summary, risk_signals_json
                 FROM reconciliation_run_items
                 WHERE run_id = ?
                 ORDER BY row_number
@@ -441,7 +475,15 @@ class ReconciliationRepository:
             "counts": json.loads(run["counts_json"]),
             "settlement_verified": False,
             "results": [
-                {**dict(row), "settlement_verified": False}
+                {
+                    **{
+                        key: value
+                        for key, value in dict(row).items()
+                        if key != "risk_signals_json"
+                    },
+                    "risk_signals": json.loads(row["risk_signals_json"]),
+                    "settlement_verified": False,
+                }
                 for row in rows
             ],
         }

@@ -54,6 +54,120 @@ def make_result():
     }
 
 
+
+def test_risk_signals_are_saved_and_restored(repository):
+    result = make_result()
+    result["results"][0]["risk_signals"] = [
+        "duplicate_in_file",
+        "historical_identifier_match",
+    ]
+    result["results"][1]["risk_signals"] = []
+
+    run_id = repository.save_run(result)
+    saved = repository.get_run(run_id)
+
+    assert saved is not None
+    assert saved["results"][0]["risk_signals"] == [
+        "duplicate_in_file",
+        "historical_identifier_match",
+    ]
+    assert saved["results"][1]["risk_signals"] == []
+    assert "risk_signals_json" not in saved["results"][0]
+    assert saved["settlement_verified"] is False
+    assert all(row["settlement_verified"] is False for row in saved["results"])
+
+
+@pytest.mark.parametrize(
+    "risk_signals",
+    [
+        "duplicate_in_file",
+        ["unknown_signal"],
+        ["duplicate_in_file", "duplicate_in_file"],
+        [None],
+    ],
+)
+def test_invalid_risk_signals_are_rejected(repository, risk_signals):
+    result = make_result()
+    result["results"][0]["risk_signals"] = risk_signals
+
+    with pytest.raises(ValueError, match="risk signals"):
+        repository.save_run(result)
+
+    assert repository.list_runs() == []
+
+
+def test_initialize_migrates_legacy_database_without_losing_history(tmp_path):
+    database_path = tmp_path / "legacy.sqlite3"
+
+    # Construct the pre-migration schema and one existing saved record.
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript("""
+            CREATE TABLE reconciliation_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                record_count INTEGER NOT NULL CHECK (record_count >= 0),
+                counts_json TEXT NOT NULL,
+                settlement_verified INTEGER NOT NULL
+                    CHECK (settlement_verified = 0)
+            );
+
+            CREATE TABLE reconciliation_run_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL
+                    REFERENCES reconciliation_runs(id) ON DELETE CASCADE,
+                row_number INTEGER NOT NULL CHECK (row_number > 0),
+                merchant_reference TEXT NOT NULL,
+                paypal_order_id TEXT NOT NULL,
+                expected_amount TEXT NOT NULL,
+                expected_currency TEXT NOT NULL,
+                observed_amount TEXT,
+                observed_currency TEXT,
+                status TEXT NOT NULL CHECK (
+                    status IN (
+                        'matched', 'amount_mismatch', 'currency_mismatch',
+                        'needs_review', 'order_not_found', 'lookup_error'
+                    )
+                ),
+                summary TEXT NOT NULL,
+                settlement_verified INTEGER NOT NULL
+                    CHECK (settlement_verified = 0),
+                UNIQUE (run_id, row_number)
+            );
+
+            INSERT INTO reconciliation_runs
+                (id, created_at, record_count, counts_json, settlement_verified)
+            VALUES
+                (1, '2026-10-20T12:00:00+00:00', 1,
+                 '{"matched":1}', 0);
+
+            INSERT INTO reconciliation_run_items (
+                run_id, row_number, merchant_reference, paypal_order_id,
+                expected_amount, expected_currency, observed_amount,
+                observed_currency, status, summary, settlement_verified
+            ) VALUES (
+                1, 1, 'LEGACY-INV', 'LEGACY-ORDER', '10.00', 'USD',
+                '10.00', 'USD', 'matched', 'Legacy saved row.', 0
+            );
+        """)
+
+    repository = ReconciliationRepository(database_path)
+    repository.initialize()
+
+    saved = repository.get_run(1)
+
+    assert saved is not None
+    assert saved["record_count"] == 1
+    assert saved["results"][0]["merchant_reference"] == "LEGACY-INV"
+    assert saved["results"][0]["risk_signals"] == []
+    assert saved["settlement_verified"] is False
+
+    # Re-running initialization must be safe and preserve the migrated row.
+    repository.initialize()
+    saved_again = repository.get_run(1)
+    assert saved_again is not None
+    assert saved_again["results"][0]["risk_signals"] == []
+
+
 def test_sparse_status_counts_are_normalized_when_saved(tmp_path):
     repo = ReconciliationRepository(tmp_path / "reconciliation.sqlite3")
     repo.initialize()

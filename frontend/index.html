@@ -234,7 +234,54 @@
      font-weight: 700;
    }
 
-   .history-warning {
+
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+
+  .analytics-card {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  .analytics-card p {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .analytics-card strong {
+    display: block;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+  }
+
+  .trend-row {
+    display: grid;
+    gap: 8px;
+  }
+
+  .trend-bar-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--line);
+  }
+
+  .trend-bar {
+    height: 100%;
+    min-width: 0;
+    border-radius: 6px;
+    background: var(--blue);
+  }
+
+  .history-warning {
      margin: 0 0 16px;
      padding: 12px 14px;
      border: 1px solid #ead7a4;
@@ -540,6 +587,37 @@
       Select Refresh saved runs to load saved reconciliation runs.
     </p>
     <div id="saved-runs-list" class="history-list"></div>
+  </section>
+
+
+  <section class="panel" id="reconciliation-analytics"
+           aria-labelledby="analytics-title">
+    <div class="history-heading">
+      <div>
+        <h2 id="analytics-title">Reconciliation analytics</h2>
+        <p class="subtext">
+          Read-only metrics calculated from saved reconciliation history.
+        </p>
+      </div>
+      <button id="refresh-analytics" type="button">Refresh analytics</button>
+    </div>
+
+    <p class="history-warning">
+      These metrics describe reconciliation records, not confirmed payments.
+      Settlement is not verified by this dashboard.
+    </p>
+
+    <p id="analytics-message" class="message info"
+       role="status" aria-live="polite">
+      Select Refresh analytics to load saved-history metrics.
+    </p>
+
+    <div id="analytics-metrics" class="analytics-grid"
+         aria-label="Reconciliation summary metrics"></div>
+
+    <h3>Daily trends</h3>
+    <p class="subtext">Up to 30 most recent days containing saved runs.</p>
+    <div id="analytics-trends" class="history-list"></div>
   </section>
 
 <section
@@ -889,6 +967,10 @@
       ].join(" · ");
 
       reconciliationResults.hidden = false;
+      reconciliationResults.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
       setReconciliationMessage(
         `Loaded saved run ${data.run_id}. Settlement has not been verified.`
       );
@@ -974,6 +1056,190 @@
   }
 
   refreshSavedRunsButton.addEventListener("click", loadSavedRuns);
+
+
+  const refreshAnalyticsButton = document.getElementById("refresh-analytics");
+  const analyticsMessage = document.getElementById("analytics-message");
+  const analyticsMetrics = document.getElementById("analytics-metrics");
+  const analyticsTrends = document.getElementById("analytics-trends");
+
+  function analyticsNumber(value) {
+    return typeof value === "number" &&
+      Number.isFinite(value) && value >= 0;
+  }
+
+  function validAnalyticsSummary(data) {
+    return Boolean(
+      data &&
+      typeof data === "object" &&
+      analyticsNumber(data.total_runs) &&
+      analyticsNumber(data.total_rows) &&
+      analyticsNumber(data.recorded_rows) &&
+      typeof data.record_count_consistent === "boolean" &&
+      data.status_counts &&
+      typeof data.status_counts === "object" &&
+      !Array.isArray(data.status_counts) &&
+      analyticsNumber(data.matched_rows) &&
+      analyticsNumber(data.exception_rows) &&
+      analyticsNumber(data.match_rate_percent) &&
+      data.match_rate_percent <= 100 &&
+      typeof data.settlement_verified === "boolean" &&
+      data.settlement_verified === false &&
+      typeof data.risk_signal_history_available === "boolean" &&
+      (data.latest_run_at === null || typeof data.latest_run_at === "string")
+    );
+  }
+
+  function validAnalyticsTrends(data) {
+    return Boolean(
+      data &&
+      typeof data === "object" &&
+      Array.isArray(data.days) &&
+      data.count === data.days.length &&
+      data.settlement_verified === false &&
+      data.days.every((day) =>
+        day &&
+        typeof day.day === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(day.day) &&
+        analyticsNumber(day.total_runs) &&
+        analyticsNumber(day.total_rows) &&
+        analyticsNumber(day.matched_rows) &&
+        analyticsNumber(day.exception_rows) &&
+        analyticsNumber(day.needs_review_rows) &&
+        analyticsNumber(day.amount_mismatch_rows) &&
+        analyticsNumber(day.currency_mismatch_rows) &&
+        analyticsNumber(day.lookup_failure_rows)
+      )
+    );
+  }
+
+  function addAnalyticsMetric(label, value) {
+    const card = document.createElement("article");
+    card.className = "analytics-card";
+
+    const heading = document.createElement("p");
+    heading.textContent = label;
+
+    const number = document.createElement("strong");
+    number.textContent = String(value);
+
+    card.append(heading, number);
+    analyticsMetrics.appendChild(card);
+  }
+
+  async function loadAnalytics() {
+    refreshAnalyticsButton.disabled = true;
+    analyticsMessage.className = "message info";
+    analyticsMessage.textContent = "Loading saved reconciliation analytics…";
+
+    try {
+      const summaryResponse = await fetch("/api/analytics/summary", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let summary;
+      try {
+        summary = await summaryResponse.json();
+      } catch {
+        throw new Error("The analytics summary response could not be read.");
+      }
+
+      if (!summaryResponse.ok || !validAnalyticsSummary(summary)) {
+        throw new Error("The analytics summary is unavailable or invalid.");
+      }
+
+      const trendsResponse = await fetch("/api/analytics/trends?limit=30", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let trends;
+      try {
+        trends = await trendsResponse.json();
+      } catch {
+        throw new Error("The analytics trends response could not be read.");
+      }
+
+      if (!trendsResponse.ok || !validAnalyticsTrends(trends)) {
+        throw new Error("The analytics trends are unavailable or invalid.");
+      }
+
+      analyticsMetrics.replaceChildren();
+      analyticsTrends.replaceChildren();
+
+      addAnalyticsMetric("Saved runs", summary.total_runs);
+      addAnalyticsMetric("Records reviewed", summary.total_rows);
+      addAnalyticsMetric("Exception records", summary.exception_rows);
+      addAnalyticsMetric("Match rate", `${summary.match_rate_percent}%`);
+      addAnalyticsMetric(
+        "Record counts consistent",
+        summary.record_count_consistent ? "Yes" : "No"
+      );
+      addAnalyticsMetric(
+        "Risk-signal history",
+        summary.risk_signal_history_available ? "Available" : "Not recorded"
+      );
+
+      if (trends.days.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "history-item";
+        empty.textContent = "No daily trends are available until a reconciliation run is saved.";
+        analyticsTrends.appendChild(empty);
+      } else {
+        const maximumRows = Math.max(
+          1,
+          ...trends.days.map((day) => day.total_rows)
+        );
+
+        for (const day of trends.days) {
+          const article = document.createElement("article");
+          article.className = "history-item trend-row";
+
+          const heading = document.createElement("h3");
+          heading.textContent = day.day;
+          article.appendChild(heading);
+
+          addHistoryDetail(article, "Runs", day.total_runs);
+          addHistoryDetail(article, "Records", day.total_rows);
+          addHistoryDetail(article, "Matched", day.matched_rows);
+          addHistoryDetail(article, "Exceptions", day.exception_rows);
+          addHistoryDetail(article, "Needs review", day.needs_review_rows);
+          addHistoryDetail(article, "Amount mismatches", day.amount_mismatch_rows);
+          addHistoryDetail(article, "Currency mismatches", day.currency_mismatch_rows);
+          addHistoryDetail(article, "Lookup failures", day.lookup_failure_rows);
+
+          const track = document.createElement("div");
+          track.className = "trend-bar-track";
+          track.setAttribute("aria-label", "Daily record volume");
+
+          const bar = document.createElement("div");
+          bar.className = "trend-bar";
+          bar.style.width = `${Math.min(100, day.total_rows / maximumRows * 100)}%`;
+          track.appendChild(bar);
+          article.appendChild(track);
+
+          analyticsTrends.appendChild(article);
+        }
+      }
+
+      analyticsMessage.className = "message info";
+      analyticsMessage.textContent =
+        `Analytics loaded. ${trends.count} daily trend bucket(s). ` +
+        "Settlement verified: No.";
+    } catch (error) {
+      analyticsMetrics.replaceChildren();
+      analyticsTrends.replaceChildren();
+      analyticsMessage.className = "message error";
+      analyticsMessage.textContent = error instanceof Error
+        ? error.message
+        : "Analytics are temporarily unavailable.";
+    } finally {
+      refreshAnalyticsButton.disabled = false;
+    }
+  }
+
+  refreshAnalyticsButton.addEventListener("click", loadAnalytics);
 
   reconciliationForm.addEventListener("submit", async (event) => {
     event.preventDefault();

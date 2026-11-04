@@ -543,3 +543,133 @@ def test_retrieving_history_storage_failure_returns_safe_503(
         "Reconciliation history is temporarily unavailable."
     )
     assert "private database path" not in response.text
+def test_analytics_summary_api_returns_empty_history(reconciliation_client):
+    client, fake_paypal = reconciliation_client
+
+    response = client.get("/api/analytics/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_runs"] == 0
+    assert body["total_rows"] == 0
+    assert body["recorded_rows"] == 0
+    assert body["record_count_consistent"] is True
+    assert body["matched_rows"] == 0
+    assert body["exception_rows"] == 0
+    assert body["match_rate_percent"] == 0.0
+    assert body["latest_run_at"] is None
+    assert body["settlement_verified"] is False
+    assert body["risk_signal_history_available"] is False
+    assert fake_paypal.requested_ids == []
+
+
+def test_analytics_trends_api_returns_empty_history(reconciliation_client):
+    client, fake_paypal = reconciliation_client
+
+    response = client.get("/api/analytics/trends")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "days": [],
+        "count": 0,
+        "limit": 30,
+        "settlement_verified": False,
+    }
+    assert fake_paypal.requested_ids == []
+
+
+def test_analytics_api_reflects_saved_reconciliation(reconciliation_client):
+    client, fake_paypal = reconciliation_client
+
+    reconciliation = client.post(
+        "/api/reconciliation",
+        json=csv_body(
+            "INV-ANALYTICS-1,ORDER-1,25.00,USD\n"
+            "INV-ANALYTICS-2,MISSING-ORDER,25.00,USD\n"
+        ),
+    )
+    assert reconciliation.status_code == 200
+
+    summary_response = client.get("/api/analytics/summary")
+    trends_response = client.get("/api/analytics/trends?limit=30")
+
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["total_runs"] == 1
+    assert summary["total_rows"] == 2
+    assert summary["recorded_rows"] == 2
+    assert summary["record_count_consistent"] is True
+    assert summary["matched_rows"] == 1
+    assert summary["exception_rows"] == 1
+    assert summary["match_rate_percent"] == 50.0
+    assert summary["settlement_verified"] is False
+
+    assert trends_response.status_code == 200
+    trends = trends_response.json()
+    assert trends["limit"] == 30
+    assert trends["count"] == 1
+    assert trends["settlement_verified"] is False
+    assert trends["days"][0]["total_runs"] == 1
+    assert trends["days"][0]["total_rows"] == 2
+    assert trends["days"][0]["matched_rows"] == 1
+    assert trends["days"][0]["exception_rows"] == 1
+    assert trends["days"][0]["lookup_failure_rows"] == 1
+
+    # Analytics must read saved data without making extra PayPal requests.
+    assert fake_paypal.requested_ids == ["ORDER-1", "MISSING-ORDER"]
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "366", "abc"])
+def test_analytics_trends_api_rejects_invalid_limits(
+    reconciliation_client, limit
+):
+    client, fake_paypal = reconciliation_client
+
+    response = client.get(f"/api/analytics/trends?limit={limit}")
+
+    assert response.status_code == 422
+    assert fake_paypal.requested_ids == []
+
+
+def test_analytics_summary_storage_failure_returns_safe_503(
+    reconciliation_client, monkeypatch
+):
+    import backend.main as main_module
+
+    client, _ = reconciliation_client
+
+    class BrokenAnalytics:
+        def __init__(self, database_path):
+            raise sqlite3.OperationalError("private database path")
+
+    monkeypatch.setattr(main_module, "ReconciliationAnalytics", BrokenAnalytics)
+
+    response = client.get("/api/analytics/summary")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Reconciliation analytics are temporarily unavailable."
+    )
+    assert "private database path" not in response.text
+
+
+def test_analytics_trends_storage_failure_returns_safe_503(
+    reconciliation_client, monkeypatch
+):
+    import backend.main as main_module
+
+    client, _ = reconciliation_client
+
+    class BrokenAnalytics:
+        def __init__(self, database_path):
+            raise sqlite3.OperationalError("private database path")
+
+    monkeypatch.setattr(main_module, "ReconciliationAnalytics", BrokenAnalytics)
+
+    response = client.get("/api/analytics/trends?limit=30")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Reconciliation analytics are temporarily unavailable."
+    )
+    assert "private database path" not in response.text

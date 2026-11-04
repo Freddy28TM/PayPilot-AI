@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from backend.analytics import ReconciliationAnalytics
 from backend.config import get_settings
 from backend.database import InvestigationRepository, ReconciliationRepository
 from backend.evidence import (
@@ -200,9 +201,11 @@ async def reconcile_merchant_csv(
                 merchant_reference=row["merchant_reference"],
                 paypal_order_id=row["paypal_order_id"],
             )
-            if row["historical_matches"]:
-                if "historical_identifier_match" not in row["risk_signals"]:
-                    row["risk_signals"].append("historical_identifier_match")
+            if (
+                row["historical_matches"]
+                and "historical_identifier_match" not in row["risk_signals"]
+            ):
+                row["risk_signals"].append("historical_identifier_match")
 
         result["run_id"] = repository.save_run(result)
     except (sqlite3.Error, OSError) as exc:
@@ -256,6 +259,41 @@ def retrieve_reconciliation_run(
         )
 
     return run
+
+
+@app.get("/api/analytics/summary")
+def get_analytics_summary(
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
+) -> dict[str, object]:
+    """Summarize saved reconciliation history without contacting PayPal."""
+    try:
+        return ReconciliationAnalytics(repository.database_path).summary()
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation analytics are temporarily unavailable.",
+        ) from exc
+
+
+@app.get("/api/analytics/trends")
+def get_analytics_trends(
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
+    limit: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> dict[str, object]:
+    """Return daily reconciliation trends from saved history."""
+    try:
+        return ReconciliationAnalytics(repository.database_path).trends(
+            limit=limit
+        )
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation analytics are temporarily unavailable.",
+        ) from exc
 
 
 @app.get("/api/paypal/orders/{order_id}")
