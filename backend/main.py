@@ -296,6 +296,24 @@ def get_analytics_trends(
         ) from exc
 
 
+@app.get("/api/analytics/investigations")
+def get_investigation_analytics(
+    repository: Annotated[
+        ReconciliationRepository, Depends(get_reconciliation_repository)
+    ],
+) -> dict[str, object]:
+    """Summarize saved PayPal investigations without contacting PayPal."""
+    try:
+        return ReconciliationAnalytics(
+            repository.database_path
+        ).investigation_summary()
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Investigation analytics are temporarily unavailable.",
+        ) from exc
+
+
 @app.get("/api/paypal/orders/{order_id}")
 def retrieve_paypal_order(
     order_id: Annotated[str, Path(min_length=1, max_length=128)],

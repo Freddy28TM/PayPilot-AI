@@ -673,3 +673,42 @@ def test_analytics_trends_storage_failure_returns_safe_503(
         "Reconciliation analytics are temporarily unavailable."
     )
     assert "private database path" not in response.text
+
+
+def test_investigation_analytics_api_returns_empty_history(
+    reconciliation_client,
+):
+    client, fake_paypal = reconciliation_client
+
+    response = client.get("/api/analytics/investigations")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_investigations"] == 0
+    assert body["classification_counts"] == {}
+    assert body["settlement_verified"] is False
+    assert fake_paypal.requested_ids == []
+
+
+def test_investigation_analytics_api_storage_failure_returns_safe_503(
+    reconciliation_client, monkeypatch
+):
+    import backend.main as main_module
+
+    client, _ = reconciliation_client
+
+    class BrokenAnalytics:
+        def __init__(self, database_path):
+            raise sqlite3.OperationalError("private investigation path")
+
+    monkeypatch.setattr(
+        main_module, "ReconciliationAnalytics", BrokenAnalytics
+    )
+
+    response = client.get("/api/analytics/investigations")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Investigation analytics are temporarily unavailable."
+    )
+    assert "private investigation path" not in response.text
