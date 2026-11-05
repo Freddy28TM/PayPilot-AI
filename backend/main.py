@@ -83,6 +83,7 @@ SESSION_COOKIE = "paypilot_session"
 SESSION_TTL_HOURS = 8
 CSRF_HEADER = "X-CSRF-Token"
 CSRF_PLACEHOLDER = "__CSRF_TOKEN__"
+ROLE_PLACEHOLDER = "__USER_ROLE__"
 
 
 class _LoginThrottle:
@@ -173,6 +174,25 @@ def require_csrf_user(
     return session
 
 
+def require_owner(
+    session: Annotated[dict, Depends(require_user)],
+) -> dict:
+    """Require the signed-in user to be an owner."""
+    if session["role"] != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail="Owner permission is required.",
+        )
+    return session
+
+
+def require_owner_csrf(
+    session: Annotated[dict, Depends(require_csrf_user)],
+) -> dict:
+    """Require an owner session plus a valid CSRF token."""
+    return require_owner(session)
+
+
 def _set_session_cookie(
     request: Request, response: Response, token: str
 ) -> None:
@@ -240,8 +260,11 @@ def serve_frontend(
         return RedirectResponse("/login", status_code=303)
 
     html = (_FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace(CSRF_PLACEHOLDER, csrf_token).replace(
+        ROLE_PLACEHOLDER, session["role"]
+    )
     return HTMLResponse(
-        html.replace(CSRF_PLACEHOLDER, csrf_token),
+        html,
         headers={"Cache-Control": "no-store"},
     )
 
@@ -357,6 +380,92 @@ def auth_login(
 
     login_throttle.reset(key)
     return {"username": user["username"], "role": user["role"]}
+
+
+@app.get("/api/auth/users")
+def list_accounts(
+    _owner: Annotated[dict, Depends(require_owner)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """List accounts (owner only)."""
+    try:
+        users = auth.list_users()
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    return {"users": users, "count": len(users)}
+
+
+@app.post("/api/auth/users", status_code=201)
+def create_employee_account(
+    credentials: Credentials,
+    owner: Annotated[dict, Depends(require_owner_csrf)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Create an employee account (owner only; owners cannot be created here)."""
+    try:
+        user_id = auth.create_user(
+            credentials.username,
+            credentials.password,
+            "employee",
+            created_by=owner["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="That username is already in use.",
+        ) from exc
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    return {
+        "id": user_id,
+        "username": credentials.username.strip(),
+        "role": "employee",
+    }
+
+
+def _change_account_state(
+    user_id: int, active: bool, owner: dict, auth: AuthRepository
+) -> dict[str, object]:
+    try:
+        found = auth.set_user_active(user_id, active, owner["user_id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    if not found:
+        raise HTTPException(status_code=404, detail="Account was not found.")
+    return {"id": user_id, "is_active": active}
+
+
+@app.post("/api/auth/users/{user_id}/deactivate")
+def deactivate_account(
+    user_id: Annotated[int, Path(ge=1)],
+    owner: Annotated[dict, Depends(require_owner_csrf)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Deactivate an employee and revoke their sessions (owner only)."""
+    return _change_account_state(user_id, False, owner, auth)
+
+
+@app.post("/api/auth/users/{user_id}/reactivate")
+def reactivate_account(
+    user_id: Annotated[int, Path(ge=1)],
+    owner: Annotated[dict, Depends(require_owner_csrf)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Reactivate an employee account (owner only)."""
+    return _change_account_state(user_id, True, owner, auth)
 
 
 @app.post("/api/auth/logout")

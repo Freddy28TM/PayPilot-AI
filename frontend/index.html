@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101c2d">
   <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <meta name="user-role" content="__USER_ROLE__">
   <title>PayPilot AI — Payment Operations</title>
   <style>
     :root {
@@ -658,6 +659,21 @@
         aria-live="polite"
       >Loading investigation history…</p>
       <div id="history-list" class="history-list"></div>
+    </section>
+
+    <section class="panel" id="team-panel" hidden aria-labelledby="team-heading">
+      <h2 id="team-heading">Team accounts</h2>
+      <p class="intro">Owners can add employees and deactivate or reactivate them.
+        Employees can investigate and reconcile but cannot manage accounts.</p>
+      <form id="team-form" autocomplete="off">
+        <label for="team-username">Employee username</label>
+        <input id="team-username" minlength="3" maxlength="64" required>
+        <label for="team-password">Temporary password (12+ characters)</label>
+        <input id="team-password" type="password" minlength="12" maxlength="1024" required>
+        <button type="submit" id="team-add">Add employee</button>
+      </form>
+      <div id="team-message" class="message" role="status"></div>
+      <ul id="team-list"></ul>
     </section>
   </main>
 
@@ -1523,6 +1539,95 @@
       }
     });
   loadInvestigationHistory();
+
+  // Owner-only team management. Employees never see or load this panel.
+  (function setupTeamPanel() {
+    const roleMeta = typeof document.querySelector === "function"
+      ? document.querySelector('meta[name="user-role"]')
+      : null;
+    if (!roleMeta || roleMeta.getAttribute("content") !== "owner") return;
+
+    const panel = document.getElementById("team-panel");
+    const teamForm = document.getElementById("team-form");
+    const teamList = document.getElementById("team-list");
+    const teamMessage = document.getElementById("team-message");
+    panel.hidden = false;
+
+    function say(text, type = "info") {
+      teamMessage.textContent = text;
+      teamMessage.className = `message ${type}`;
+    }
+
+    async function post(path, body) {
+      return apiFetch(path, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken()
+        },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+    }
+
+    async function loadTeam() {
+      try {
+        const response = await apiFetch("/api/auth/users", {
+          headers: { "Accept": "application/json" }
+        });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.users)) throw new Error();
+        teamList.replaceChildren();
+        for (const user of data.users) {
+          const item = document.createElement("li");
+          item.textContent =
+            `${user.username} · ${user.role} · ${user.is_active ? "active" : "deactivated"} `;
+          if (user.role === "employee") {
+            const toggle = document.createElement("button");
+            toggle.type = "button";
+            toggle.className = "link-button";
+            toggle.textContent = user.is_active ? "Deactivate" : "Reactivate";
+            toggle.addEventListener("click", async () => {
+              const action = user.is_active ? "deactivate" : "reactivate";
+              const result = await post(`/api/auth/users/${user.id}/${action}`);
+              say(result.ok ? "Account updated." : "The change could not be made.",
+                  result.ok ? "info" : "error");
+              await loadTeam();
+            });
+            item.appendChild(toggle);
+          }
+          teamList.appendChild(item);
+        }
+      } catch {
+        say("Team accounts could not be loaded.", "error");
+      }
+    }
+
+    teamForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const username = document.getElementById("team-username");
+      const password = document.getElementById("team-password");
+      const result = await post("/api/auth/users", {
+        username: username.value,
+        password: password.value
+      });
+      const messages = {
+        201: "Employee added.",
+        409: "That username is already in use.",
+        422: "Check the username (3–64 letters, digits, . _ -) and password (12+ characters).",
+        403: "Your session security token expired. Reload the page."
+      };
+      say(messages[result.status] || "The account could not be created.",
+          result.status === 201 ? "info" : "error");
+      if (result.status === 201) {
+        username.value = "";
+        password.value = "";
+      }
+      await loadTeam();
+    });
+
+    loadTeam();
+  })();
   </script>
 </body>
 </html>

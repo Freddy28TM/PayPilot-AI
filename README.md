@@ -53,6 +53,10 @@ credentials and test data only.
 | GET | `/api/auth/status` | Reports whether setup is required and whether the caller is signed in |
 | POST | `/api/auth/setup` | Creates the first owner account (only while none exists) and signs in |
 | POST | `/api/auth/login` | Signs in with a username and password |
+| GET | `/api/auth/users` | Lists accounts (owner only) |
+| POST | `/api/auth/users` | Creates an employee account (owner only, CSRF token required) |
+| POST | `/api/auth/users/{id}/deactivate` | Deactivates an employee and revokes their sessions (owner only) |
+| POST | `/api/auth/users/{id}/reactivate` | Reactivates an employee (owner only) |
 | POST | `/api/auth/logout` | Revokes the current session (requires CSRF token) |
 | GET | `/api/paypal/orders/{order_id}` | Retrieves a PayPal Sandbox order |
 | GET | `/api/paypal/orders/{order_id}/investigation` | Returns selected evidence, deterministic assessments, and an explanation |
@@ -123,9 +127,14 @@ operations service.
   (and `Secure` over HTTPS); sessions expire after 8 hours; the state-changing
   reconciliation upload and logout require a per-page-load CSRF token; failed
   sign-ins are audited and throttled (5 failures per username and client
-  address per 5 minutes, held in memory). Only one account (the owner) can be
-  created through the interface; there is no role-based authorization,
-  password reset, multi-factor authentication, or user management yet.
+  address per 5 minutes, held in memory). There are two roles. The single owner is created
+  during first-time setup; there is no public registration. The owner can add,
+  deactivate, and reactivate employee accounts (the **Team accounts** panel).
+  Employees can investigate, reconcile, and view history and analytics but
+  cannot manage accounts; owners cannot be created, changed, or deactivated
+  through the API. Account creation, deactivation, and reactivation are
+  audited (the audit table does not yet record which owner acted). There is
+  no password reset or multi-factor authentication.
 - First-time setup is open to whoever reaches the server first. Complete it
   yourself before exposing the app to anyone else, and do not expose it to the
   public internet or an untrusted network without TLS and further review.

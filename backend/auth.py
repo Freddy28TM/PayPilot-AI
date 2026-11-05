@@ -431,6 +431,71 @@ class AuthRepository:
             return None
         return {"id": user["id"], "username": user["username"], "role": user["role"]}
 
+    def list_users(self) -> list[dict]:
+        """Return all accounts without credential material."""
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT id, username, role, is_active, created_at
+                FROM auth_users
+                ORDER BY id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_user_active(self, user_id: int, active: bool, actor_id: int) -> bool:
+        """Activate or deactivate an employee account.
+
+        Owners cannot be changed here and nobody can change their own
+        account. Deactivation also revokes the account's live sessions.
+        Returns False when the account does not exist.
+        """
+        if isinstance(user_id, bool) or not isinstance(user_id, int):
+            return False
+        if user_id == actor_id:
+            raise ValueError("You cannot change your own account.")
+
+        now = _timestamp(_now())
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT username, role FROM auth_users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            username, role = row
+            if role != "employee":
+                raise ValueError("Only employee accounts can be changed.")
+
+            connection.execute(
+                "UPDATE auth_users SET is_active = ? WHERE id = ?",
+                (1 if active else 0, user_id),
+            )
+            if not active:
+                connection.execute(
+                    """
+                    UPDATE auth_sessions SET revoked_at = ?
+                    WHERE user_id = ? AND revoked_at IS NULL
+                    """,
+                    (now, user_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO auth_audit_events (
+                    user_id, username, event_type, succeeded, occurred_at
+                )
+                VALUES (?, ?, ?, 1, ?)
+                """,
+                (
+                    user_id,
+                    username,
+                    "account_reactivated" if active else "account_deactivated",
+                    now,
+                ),
+            )
+        return True
+
     def rotate_csrf_token(self, session_id: int) -> str | None:
         """Replace a valid session's CSRF secret and return it once."""
         if isinstance(session_id, bool) or not isinstance(session_id, int):
