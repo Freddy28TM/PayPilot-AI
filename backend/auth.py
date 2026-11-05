@@ -102,6 +102,17 @@ def _verify_password(password: str, encoded: str) -> bool:
         return False
 
 
+_DUMMY_HASH: str | None = None
+
+
+def _dummy_password_hash() -> str:
+    """Return a valid hash used to equalize timing for unknown accounts."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = _hash_password(secrets.token_urlsafe(24))
+    return _DUMMY_HASH
+
+
 class AuthRepository:
     """Store user accounts, hashed sessions, and security audit events."""
 
@@ -335,6 +346,124 @@ class AuthRepository:
         return bool(
             row and hmac.compare_digest(row[0], _token_hash(csrf_token))
         )
+
+    def create_initial_owner(self, username: str, password: str) -> int:
+        """Atomically create the first owner account, exactly once."""
+        if not isinstance(username, str):
+            raise TypeError("Username must be a string.")
+
+        normalized_username = username.strip()
+        if not _USERNAME_PATTERN.fullmatch(normalized_username):
+            raise ValueError(
+                "Username must be 3–64 letters, digits, dots, underscores, or hyphens."
+            )
+
+        password_hash = _hash_password(password)
+        created_at = _timestamp(_now())
+
+        with self._connection() as connection:
+            # Serialize competing bootstrap attempts before checking owners.
+            connection.execute("BEGIN IMMEDIATE")
+
+            existing_owner = connection.execute(
+                "SELECT 1 FROM auth_users WHERE role = 'owner' LIMIT 1"
+            ).fetchone()
+
+            if existing_owner is not None:
+                raise ValueError("An initial owner account already exists.")
+
+            cursor = connection.execute(
+                """
+                INSERT INTO auth_users (
+                    username, password_hash, role, created_at, created_by
+                )
+                VALUES (?, ?, 'owner', ?, NULL)
+                """,
+                (normalized_username, password_hash, created_at),
+            )
+            user_id = int(cursor.lastrowid)
+
+            connection.execute(
+                """
+                INSERT INTO auth_audit_events (
+                    user_id, username, event_type, succeeded, occurred_at
+                )
+                VALUES (?, ?, 'account_created', 1, ?)
+                """,
+                (user_id, normalized_username, created_at),
+            )
+
+            return user_id
+
+    def has_owner(self) -> bool:
+        """Report whether the initial owner account has been created."""
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM auth_users WHERE role = 'owner' LIMIT 1"
+            ).fetchone()
+        return row is not None
+
+    def authenticate(self, username: str, password: str) -> dict | None:
+        """Verify credentials, audit the attempt, and return the active user.
+
+        Unknown, inactive, and wrong-password attempts are indistinguishable
+        to the caller, and a password hash is always computed to reduce
+        timing differences between them.
+        """
+        if (
+            not isinstance(username, str)
+            or not isinstance(password, str)
+            or not 1 <= len(username) <= 64
+        ):
+            return None
+
+        user = self.get_user_for_login(username)
+        encoded = user["password_hash"] if user else _dummy_password_hash()
+        password_ok = _verify_password(password, encoded)
+        succeeded = bool(user and user["is_active"] == 1 and password_ok)
+
+        self.record_login(
+            username.strip(),
+            succeeded,
+            user["id"] if user else None,
+        )
+        if not succeeded or user is None:
+            return None
+        return {"id": user["id"], "username": user["username"], "role": user["role"]}
+
+    def rotate_csrf_token(self, session_id: int) -> str | None:
+        """Replace a valid session's CSRF secret and return it once."""
+        if isinstance(session_id, bool) or not isinstance(session_id, int):
+            return None
+
+        csrf_token = secrets.token_urlsafe(32)
+
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE auth_sessions
+                SET csrf_hash = ?
+                WHERE id = ?
+                  AND revoked_at IS NULL
+                  AND expires_at > ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM auth_users
+                      WHERE auth_users.id = auth_sessions.user_id
+                        AND auth_users.is_active = 1
+                  )
+                """,
+                (
+                    _token_hash(csrf_token),
+                    session_id,
+                    _timestamp(_now()),
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                return None
+
+        return csrf_token
 
     def revoke_session(self, token: str) -> bool:
         """Revoke a session by its raw cookie token."""

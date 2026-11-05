@@ -316,3 +316,62 @@ def test_session_and_csrf_reject_oversized_tokens(auth):
 
     # Normal generated tokens must continue to work.
     assert auth.validate_csrf(session["session_id"], csrf_token)
+
+
+def test_initial_owner_can_only_be_created_once(auth):
+    owner_id = auth.create_initial_owner(
+        "first.owner",
+        "Strong-Test-Password-2026!",
+    )
+
+    assert owner_id > 0
+
+    owner = auth.get_user_for_login("first.owner")
+    assert owner is not None
+    assert owner["role"] == "owner"
+    assert owner["is_active"] == 1
+
+    with pytest.raises(ValueError, match="already exists"):
+        auth.create_initial_owner(
+            "second.owner",
+            "Another-Strong-Password-2026!",
+        )
+
+    assert auth.get_user_for_login("second.owner") is None
+
+
+def test_csrf_token_rotation_invalidates_previous_token(auth):
+    user_id = auth.create_user(
+        "csrf.owner",
+        "Strong-Test-Password-2026!",
+        "owner",
+    )
+
+    session_token, original_csrf, _ = auth.create_session(user_id)
+    session = auth.get_session(session_token)
+
+    assert session is not None
+    assert auth.validate_csrf(session["session_id"], original_csrf)
+
+    rotated_csrf = auth.rotate_csrf_token(session["session_id"])
+
+    assert rotated_csrf is not None
+    assert rotated_csrf != original_csrf
+    assert not auth.validate_csrf(session["session_id"], original_csrf)
+    assert auth.validate_csrf(session["session_id"], rotated_csrf)
+
+
+def test_csrf_rotation_rejects_revoked_session(auth):
+    user_id = auth.create_user(
+        "revoked.owner",
+        "Strong-Test-Password-2026!",
+        "owner",
+    )
+
+    session_token, _, _ = auth.create_session(user_id)
+    session = auth.get_session(session_token)
+
+    assert session is not None
+    assert auth.revoke_session(session_token)
+
+    assert auth.rotate_csrf_token(session["session_id"]) is None

@@ -2,15 +2,26 @@
 
 import json
 import sqlite3
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import FileResponse
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.analytics import ReconciliationAnalytics
+from backend.auth import AuthRepository
 from backend.config import get_settings
 from backend.database import InvestigationRepository, ReconciliationRepository
 from backend.evidence import (
@@ -50,10 +61,130 @@ def get_paypal_client(request: Request) -> PayPalClient:
     return request.app.state.paypal_client
 
 
-
 def get_gemini_explainer(request: Request) -> GeminiExplainer:
     """Return the application-scoped Gemini explainer."""
     return request.app.state.gemini_explainer
+
+
+def get_auth_repository() -> AuthRepository:
+    """Create and initialize the local authentication repository."""
+    repository = AuthRepository()
+    try:
+        repository.initialize()
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    return repository
+
+
+SESSION_COOKIE = "paypilot_session"
+SESSION_TTL_HOURS = 8
+CSRF_HEADER = "X-CSRF-Token"
+CSRF_PLACEHOLDER = "__CSRF_TOKEN__"
+
+
+class _LoginThrottle:
+    """Small in-memory limiter for repeated failed sign-in attempts."""
+
+    def __init__(self, max_failures: int = 5, window_seconds: int = 300):
+        self.max_failures = max_failures
+        self.window_seconds = window_seconds
+        self._failures: dict[tuple[str, str], list[float]] = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key: tuple[str, str], now: float) -> list[float]:
+        recent = [
+            t for t in self._failures.get(key, [])
+            if now - t < self.window_seconds
+        ]
+        if recent:
+            self._failures[key] = recent
+        else:
+            self._failures.pop(key, None)
+        return recent
+
+    def blocked(self, key: tuple[str, str]) -> bool:
+        with self._lock:
+            return len(self._recent(key, time.monotonic())) >= self.max_failures
+
+    def record_failure(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            now = time.monotonic()
+            recent = self._recent(key, now)
+            recent.append(now)
+            self._failures[key] = recent
+
+    def reset(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
+
+
+login_throttle = _LoginThrottle()
+
+
+class Credentials(BaseModel):
+    """Strict JSON request for sign-in and first-owner setup."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    username: str
+    password: str
+
+
+def _current_session(request: Request, auth: AuthRepository) -> dict | None:
+    token = request.cookies.get(SESSION_COOKIE)
+    return auth.get_session(token) if token else None
+
+
+def require_user(
+    request: Request,
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict:
+    """Require a valid signed-in session for the request."""
+    try:
+        session = _current_session(request, auth)
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    if session is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication is required.",
+        )
+    return session
+
+
+def require_csrf_user(
+    request: Request,
+    session: Annotated[dict, Depends(require_user)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict:
+    """Require a signed-in session plus a valid CSRF token header."""
+    token = request.headers.get(CSRF_HEADER, "")
+    if not auth.validate_csrf(session["session_id"], token):
+        raise HTTPException(
+            status_code=403,
+            detail="The CSRF token is missing or invalid. Reload the page.",
+        )
+    return session
+
+
+def _set_session_cookie(
+    request: Request, response: Response, token: str
+) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_TTL_HOURS * 3600,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
 
 
 def get_investigation_repository() -> InvestigationRepository:
@@ -90,15 +221,156 @@ class ReconciliationRequest(BaseModel):
     csv_text: str
 
 
+_FRONTEND_DIR = FilePath(__file__).resolve().parent.parent / "frontend"
+
+
 @app.get("/", include_in_schema=False)
-def serve_frontend() -> FileResponse:
-    """Serve the PayPilot AI investigation interface."""
-    frontend_path = (
-        FilePath(__file__).resolve().parent.parent
-        / "frontend"
-        / "index.html"
+def serve_frontend(
+    request: Request,
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+):
+    """Serve the interface to signed-in users; others go to the login page."""
+    session = _current_session(request, auth)
+    if session is None:
+        return RedirectResponse("/login", status_code=303)
+
+    # Each page load receives a fresh CSRF token bound to this session.
+    csrf_token = auth.rotate_csrf_token(session["session_id"])
+    if csrf_token is None:
+        return RedirectResponse("/login", status_code=303)
+
+    html = (_FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(
+        html.replace(CSRF_PLACEHOLDER, csrf_token),
+        headers={"Cache-Control": "no-store"},
     )
-    return FileResponse(frontend_path)
+
+
+@app.get("/login", include_in_schema=False)
+def serve_login() -> FileResponse:
+    """Serve the sign-in and first-owner setup page."""
+    return FileResponse(
+        _FRONTEND_DIR / "login.html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/auth/status")
+def auth_status(
+    request: Request,
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Report whether setup is needed and whether the caller is signed in."""
+    try:
+        session = _current_session(request, auth)
+        setup_required = not auth.has_owner()
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    return {
+        "setup_required": setup_required,
+        "authenticated": session is not None,
+        "username": session["username"] if session else None,
+        "role": session["role"] if session else None,
+    }
+
+
+def _start_session(
+    request: Request,
+    response: Response,
+    auth: AuthRepository,
+    user_id: int,
+) -> None:
+    token, _csrf, _expires = auth.create_session(
+        user_id, ttl_hours=SESSION_TTL_HOURS
+    )
+    _set_session_cookie(request, response, token)
+
+
+@app.post("/api/auth/setup")
+def auth_setup(
+    credentials: Credentials,
+    request: Request,
+    response: Response,
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Create the first owner account (only while none exists) and sign in."""
+    try:
+        user_id = auth.create_initial_owner(
+            credentials.username, credentials.password
+        )
+    except ValueError as exc:
+        if "already exists" in str(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="Setup has already been completed. Sign in instead.",
+            ) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Setup has already been completed. Sign in instead.",
+        ) from exc
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+
+    _start_session(request, response, auth, user_id)
+    return {"username": credentials.username.strip(), "role": "owner"}
+
+
+@app.post("/api/auth/login")
+def auth_login(
+    credentials: Credentials,
+    request: Request,
+    response: Response,
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, object]:
+    """Sign in with a username and password."""
+    client_host = request.client.host if request.client else "unknown"
+    key = (credentials.username.strip().lower()[:64], client_host)
+
+    if login_throttle.blocked(key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed sign-in attempts. Try again in a few minutes.",
+        )
+
+    try:
+        user = auth.authenticate(credentials.username, credentials.password)
+        if user is None:
+            login_throttle.record_failure(key)
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username or password.",
+            )
+        _start_session(request, response, auth, user["id"])
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+
+    login_throttle.reset(key)
+    return {"username": user["username"], "role": user["role"]}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(
+    request: Request,
+    response: Response,
+    _session: Annotated[dict, Depends(require_csrf_user)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+) -> dict[str, bool]:
+    """Revoke the current session and clear its cookie."""
+    token = request.cookies.get(SESSION_COOKIE, "")
+    auth.revoke_session(token)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"signed_out": True}
 
 
 @app.get("/health")
@@ -107,7 +379,7 @@ def health_check() -> dict[str, str]:
     return {"status": "ok", "environment": "sandbox"}
 
 
-@app.get("/api/investigations")
+@app.get("/api/investigations", dependencies=[Depends(require_user)])
 def list_investigation_history(
     repository: Annotated[
         InvestigationRepository, Depends(get_investigation_repository)
@@ -129,7 +401,7 @@ def list_investigation_history(
     }
 
 
-@app.post("/api/reconciliation")
+@app.post("/api/reconciliation", dependencies=[Depends(require_csrf_user)])
 async def reconcile_merchant_csv(
     request: Request,
     paypal: Annotated[PayPalClient, Depends(get_paypal_client)],
@@ -217,7 +489,7 @@ async def reconcile_merchant_csv(
     return result
 
 
-@app.get("/api/reconciliation/runs")
+@app.get("/api/reconciliation/runs", dependencies=[Depends(require_user)])
 def list_reconciliation_runs(
     repository: Annotated[
         ReconciliationRepository, Depends(get_reconciliation_repository)
@@ -236,7 +508,7 @@ def list_reconciliation_runs(
     return {"runs": runs, "count": len(runs)}
 
 
-@app.get("/api/reconciliation/runs/{run_id}")
+@app.get("/api/reconciliation/runs/{run_id}", dependencies=[Depends(require_user)])
 def retrieve_reconciliation_run(
     run_id: Annotated[int, Path(ge=1)],
     repository: Annotated[
@@ -261,7 +533,7 @@ def retrieve_reconciliation_run(
     return run
 
 
-@app.get("/api/analytics/summary")
+@app.get("/api/analytics/summary", dependencies=[Depends(require_user)])
 def get_analytics_summary(
     repository: Annotated[
         ReconciliationRepository, Depends(get_reconciliation_repository)
@@ -277,7 +549,7 @@ def get_analytics_summary(
         ) from exc
 
 
-@app.get("/api/analytics/trends")
+@app.get("/api/analytics/trends", dependencies=[Depends(require_user)])
 def get_analytics_trends(
     repository: Annotated[
         ReconciliationRepository, Depends(get_reconciliation_repository)
@@ -296,7 +568,7 @@ def get_analytics_trends(
         ) from exc
 
 
-@app.get("/api/analytics/investigations")
+@app.get("/api/analytics/investigations", dependencies=[Depends(require_user)])
 def get_investigation_analytics(
     repository: Annotated[
         InvestigationRepository, Depends(get_investigation_repository)
@@ -314,7 +586,7 @@ def get_investigation_analytics(
         ) from exc
 
 
-@app.get("/api/paypal/orders/{order_id}")
+@app.get("/api/paypal/orders/{order_id}", dependencies=[Depends(require_user)])
 def retrieve_paypal_order(
     order_id: Annotated[str, Path(min_length=1, max_length=128)],
     paypal: Annotated[PayPalClient, Depends(get_paypal_client)],
@@ -354,7 +626,7 @@ def retrieve_paypal_order(
     return select_order_evidence(order)
 
 
-@app.get("/api/paypal/orders/{order_id}/investigation")
+@app.get("/api/paypal/orders/{order_id}/investigation", dependencies=[Depends(require_user)])
 def investigate_paypal_order(
     order_id: Annotated[str, Path(min_length=1, max_length=128)],
     paypal: Annotated[PayPalClient, Depends(get_paypal_client)],
@@ -410,7 +682,7 @@ def investigate_paypal_order(
     capture_assessment = assess_capture_evidence(order)
     try:
         explanation = explainer.explain(order, assessment)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # AI explanations are optional; deterministic findings remain authoritative.
         explanation = {
             "status": "fallback",

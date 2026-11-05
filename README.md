@@ -36,7 +36,9 @@ uvicorn backend.main:app --reload
 Before starting the server, edit .env locally and add your PayPal
 Developer Sandbox credentials. Configure an AI provider key if you want
 AI-generated explanations. Never commit .env or share its secrets.
-Open http://127.0.0.1:8000/ for the interface.
+Open http://127.0.0.1:8000/ for the interface. On first run you are sent to
+a setup page to create the owner account (username plus a password of at
+least 12 characters); afterwards you sign in with it.
 Open http://127.0.0.1:8000/health to check the API.
 PayPilot AI is restricted to PayPal Sandbox during setup. Use Sandbox
 credentials and test data only.
@@ -45,8 +47,13 @@ credentials and test data only.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/` | Serves the web interface |
+| GET | `/` | Serves the web interface (redirects to `/login` when signed out) |
+| GET | `/login` | Serves the sign-in / first-time setup page |
 | GET | `/health` | Checks API availability |
+| GET | `/api/auth/status` | Reports whether setup is required and whether the caller is signed in |
+| POST | `/api/auth/setup` | Creates the first owner account (only while none exists) and signs in |
+| POST | `/api/auth/login` | Signs in with a username and password |
+| POST | `/api/auth/logout` | Revokes the current session (requires CSRF token) |
 | GET | `/api/paypal/orders/{order_id}` | Retrieves a PayPal Sandbox order |
 | GET | `/api/paypal/orders/{order_id}/investigation` | Returns selected evidence, deterministic assessments, and an explanation |
 | POST | `/api/reconciliation` | Compares uploaded CSV records with PayPal Sandbox order evidence and saves the run |
@@ -55,7 +62,7 @@ credentials and test data only.
 | GET | `/api/analytics/summary` | Summarizes all saved reconciliation runs, status counts, record-match rate, record-count consistency, and risk-signal history availability |
 | GET | `/api/analytics/trends?limit=30` | Returns daily reconciliation aggregates; `limit` is 1–365 and defaults to 30 |
 
-Investigation and reconciliation endpoints are read-only. Reconciliation history
+All `/api/*` routes except `/api/auth/*` require a signed-in session. Investigation and reconciliation endpoints are read-only toward PayPal. Reconciliation history
 lets you review saved comparisons without repeating PayPal lookups. The default
 database is stored at `data/paypilot.sqlite3`; tests use temporary databases.
 
@@ -110,14 +117,23 @@ production-ready.
 PayPilot AI is a local development prototype, not a production payment
 operations service.
 
-- The application currently has no application-level login or authorization
-  protecting its API routes. Do not expose it to the public internet or an
-  untrusted network.
+- **Authentication.** All data routes require a signed-in session. Passwords
+  are hashed with scrypt; session tokens and CSRF tokens are stored only as
+  SHA-256 hashes; the session cookie is `HttpOnly` and `SameSite=Strict`
+  (and `Secure` over HTTPS); sessions expire after 8 hours; the state-changing
+  reconciliation upload and logout require a per-page-load CSRF token; failed
+  sign-ins are audited and throttled (5 failures per username and client
+  address per 5 minutes, held in memory). Only one account (the owner) can be
+  created through the interface; there is no role-based authorization,
+  password reset, multi-factor authentication, or user management yet.
+- First-time setup is open to whoever reaches the server first. Complete it
+  yourself before exposing the app to anyone else, and do not expose it to the
+  public internet or an untrusted network without TLS and further review.
 - Use PayPal Sandbox credentials and synthetic test data only. The Sandbox
   configuration check is not a substitute for a production security review.
 - Keep `.env` local and never commit or share API credentials.
 - Before any production deployment, implement and test appropriate
-  authentication, role-based authorization, secret management, secure
+  role-based authorization, multi-factor authentication, secret management, secure
   deployment configuration, audit logging, and operational monitoring.
 - Review privacy, data-retention, backup, and recovery requirements before
   storing real customer or payment-related information.
@@ -147,3 +163,7 @@ node --test tests/frontend_history.test.cjs
 ```
 
 The frontend tests use Node.js's built-in test runner; npm is not required.
+
+## License
+
+PayPilot AI is released under the [Apache License 2.0](LICENSE).

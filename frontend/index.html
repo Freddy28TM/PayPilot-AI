@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101c2d">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
   <title>PayPilot AI — Payment Operations</title>
   <style>
     :root {
@@ -183,6 +184,15 @@
 
     button:hover { background: #1e46b5; }
     button:disabled { cursor: wait; opacity: .65; }
+
+    .topbar-actions { display: flex; align-items: center; gap: 14px; }
+    .link-button {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, .35);
+      padding: 4px 12px;
+      font-size: 13px;
+    }
+    .link-button:hover { background: rgba(255, 255, 255, .12); }
 
     .message {
       margin-top: 14px;
@@ -426,7 +436,10 @@
         <div class="brand-mark" aria-hidden="true">P</div>
         <span>PayPilot AI</span>
       </div>
-      <span class="sandbox">SANDBOX MODE</span>
+      <span class="topbar-actions">
+        <span class="sandbox">SANDBOX MODE</span>
+        <button type="button" id="logout-button" class="link-button">Sign out</button>
+      </span>
     </div>
   </header>
 
@@ -660,6 +673,36 @@
     const message = document.getElementById("message");
     const results = document.getElementById("results");
 
+    // Send the user to the login page when the session is missing or expired.
+    async function apiFetch(...args) {
+      const response = await fetch(...args);
+      if (response && response.status === 401 && typeof window !== "undefined") {
+        window.location.assign("/login");
+      }
+      return response;
+    }
+
+    function csrfToken() {
+      const meta = typeof document.querySelector === "function"
+        ? document.querySelector('meta[name="csrf-token"]')
+        : null;
+      return meta ? meta.getAttribute("content") : "";
+    }
+
+    document.getElementById("logout-button").addEventListener(
+      "click",
+      async () => {
+        try {
+          await fetch("/api/auth/logout", {
+            method: "POST",
+            headers: { "X-CSRF-Token": csrfToken() }
+          });
+        } finally {
+          window.location.assign("/login");
+        }
+      }
+    );
+
     function setText(id, value) {
       document.getElementById(id).textContent =
         value == null || value === "" ? "Not available" : String(value);
@@ -697,7 +740,7 @@
     historyMessage.textContent = "Loading investigation history…";
 
     try {
-      const response = await fetch("/api/investigations?limit=50", {
+      const response = await apiFetch("/api/investigations?limit=50", {
         method: "GET",
         headers: { "Accept": "application/json" }
       });
@@ -923,7 +966,7 @@
     setSavedRunsMessage(`Loading saved run ${runId}…`);
 
     try {
-      const response = await fetch(`/api/reconciliation/runs/${runId}`, {
+      const response = await apiFetch(`/api/reconciliation/runs/${runId}`, {
         headers: { "Accept": "application/json" }
       });
 
@@ -991,7 +1034,7 @@
     setSavedRunsMessage("Loading saved reconciliation runs…");
 
     try {
-      const response = await fetch("/api/reconciliation/runs?limit=50", {
+      const response = await apiFetch("/api/reconciliation/runs?limit=50", {
         headers: { "Accept": "application/json" }
       });
 
@@ -1133,7 +1176,7 @@
     analyticsMessage.textContent = "Loading saved reconciliation analytics…";
 
     try {
-      const summaryResponse = await fetch("/api/analytics/summary", {
+      const summaryResponse = await apiFetch("/api/analytics/summary", {
         method: "GET",
         headers: { "Accept": "application/json" }
       });
@@ -1149,7 +1192,7 @@
         throw new Error("The analytics summary is unavailable or invalid.");
       }
 
-      const trendsResponse = await fetch("/api/analytics/trends?limit=30", {
+      const trendsResponse = await apiFetch("/api/analytics/trends?limit=30", {
         method: "GET",
         headers: { "Accept": "application/json" }
       });
@@ -1267,11 +1310,12 @@
     try {
       const csvText = await file.text();
 
-      const response = await fetch("/api/reconciliation", {
+      const response = await apiFetch("/api/reconciliation", {
         method: "POST",
         headers: {
           "Accept": "application/json",
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken()
         },
         body: JSON.stringify({ csv_text: csvText })
       });
@@ -1286,6 +1330,7 @@
       if (!response.ok) {
         const safeMessages = {
           400: "The request was invalid. Check the file and try again.",
+          403: "Your session security token expired. Reload the page and try again.",
           413: "The CSV exceeds the 1 MB size limit.",
           422: "The CSV format or its records are invalid. Check the required columns and values.",
           502: "PayPal could not complete one or more lookups. Try again later.",
@@ -1383,7 +1428,7 @@
       setMessage("Retrieving order evidence and preparing the assessment…");
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/paypal/orders/${encodeURIComponent(orderId)}/investigation`,
           {
             method: "GET",

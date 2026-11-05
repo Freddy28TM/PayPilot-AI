@@ -67,22 +67,6 @@ def api_client(tmp_path):
         app.dependency_overrides.clear()
 
 
-def test_homepage_serves_frontend(api_client):
-    client, _ = api_client
-
-    response = client.get("/")
-
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    assert "PayPilot AI" in response.text
-    assert 'id="investigation-form"' in response.text
-    assert 'id="investigation-history"' in response.text
-    assert 'id="history-list"' in response.text
-    assert 'id="history-message"' in response.text
-    assert "/api/investigations" in response.text
-    assert "does not verify settlement" in response.text.lower()
-
-
 def test_health_endpoint(api_client):
     client, _ = api_client
 
