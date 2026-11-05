@@ -94,6 +94,15 @@ function createHarness(responses) {
   const context = vm.createContext({
     document,
     fetch: async (...args) => {
+      if (args[0] === "/api/auth/me") {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { user: { id: 1, username: "test.owner", role: "owner" } };
+          },
+        };
+      }
       requests.push(args);
       if (!responses.length) {
         throw new Error("No mock response configured");

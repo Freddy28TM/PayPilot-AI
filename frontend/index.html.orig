@@ -1,0 +1,1528 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101c2d">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>PayPilot AI — Payment Operations</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17243a;
+      --muted: #64748b;
+      --line: #e1e7ef;
+      --surface: #ffffff;
+      --canvas: #f4f7fb;
+      --navy: #101c2d;
+      --blue: #2859d6;
+      --blue-soft: #edf3ff;
+      --green: #18794e;
+      --amber: #946200;
+      --red: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font: 15px/1.6 system-ui, -apple-system, BlinkMacSystemFont,
+            "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    .topbar {
+      background: var(--navy);
+      color: white;
+      padding: 18px 24px;
+    }
+
+    .topbar-inner, main, footer {
+      width: min(1060px, calc(100% - 40px));
+      margin-inline: auto;
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 19px;
+      font-weight: 750;
+      letter-spacing: -.4px;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: #2859d6;
+      font-size: 18px;
+    }
+
+    .sandbox {
+      border: 1px solid #627187;
+      border-radius: 999px;
+      padding: 5px 11px;
+      color: #e5edff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .6px;
+    }
+
+    main { padding: 38px 0 52px; }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 7px 0 10px;
+      font-size: clamp(28px, 4vw, 39px);
+      line-height: 1.2;
+      letter-spacing: -1.2px;
+    }
+
+    .intro {
+      max-width: 650px;
+      margin: 0 0 26px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .notice {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 22px;
+      padding: 14px 16px;
+      border: 1px solid #cbdaf8;
+      border-radius: 12px;
+      background: var(--blue-soft);
+      color: #24447e;
+    }
+
+    .notice strong { display: block; }
+    .notice p { margin: 2px 0 0; font-size: 13px; }
+
+    .panel {
+      margin-bottom: 20px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: 0 5px 22px rgb(20 35 60 / 4%);
+    }
+
+    .panel h2 {
+      margin: 0 0 5px;
+      font-size: 18px;
+      letter-spacing: -.3px;
+    }
+
+    .subtext {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .form-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+    }
+
+    .field { flex: 1; min-width: 0; }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      min-height: 48px;
+      padding: 11px 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      background: white;
+      color: var(--ink);
+    }
+
+    input:focus-visible, button:focus-visible {
+      outline: 3px solid #9bb9ff;
+      outline-offset: 2px;
+    }
+
+    button {
+      min-height: 48px;
+      padding: 11px 18px;
+      border: 0;
+      border-radius: 9px;
+      background: var(--blue);
+      color: white;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    button:hover { background: #1e46b5; }
+    button:disabled { cursor: wait; opacity: .65; }
+
+    .topbar-actions { display: flex; align-items: center; gap: 14px; }
+    .link-button {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, .35);
+      padding: 4px 12px;
+      font-size: 13px;
+    }
+    .link-button:hover { background: rgba(255, 255, 255, .12); }
+
+    .message {
+      margin-top: 14px;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .message.error { color: var(--red); }
+    .message.info { color: var(--muted); }
+
+
+   .history-heading {
+     display: flex;
+     align-items: center;
+     justify-content: space-between;
+     gap: 12px;
+     margin-bottom: 14px;
+   }
+
+   .history-heading h2 { margin: 0 0 5px; }
+
+   .history-list {
+     display: grid;
+     gap: 12px;
+   }
+
+   .history-item {
+     min-width: 0;
+     padding: 16px;
+     border: 1px solid var(--line);
+     border-radius: 12px;
+     background: var(--surface);
+   }
+
+   .history-item h3 {
+     margin: 0 0 10px;
+     font-size: 15px;
+     overflow-wrap: anywhere;
+   }
+
+   .history-item p {
+     margin: 6px 0;
+     font-size: 13px;
+     overflow-wrap: anywhere;
+   }
+
+   .history-label {
+     color: var(--muted);
+     font-weight: 700;
+   }
+
+
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+
+  .analytics-card {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  .analytics-card p {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .analytics-card strong {
+    display: block;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+  }
+
+  .trend-row {
+    display: grid;
+    gap: 8px;
+  }
+
+  .trend-bar-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--line);
+  }
+
+  .trend-bar {
+    height: 100%;
+    min-width: 0;
+    border-radius: 6px;
+    background: var(--blue);
+  }
+
+  .history-warning {
+     margin: 0 0 16px;
+     padding: 12px 14px;
+     border: 1px solid #ead7a4;
+     border-radius: 10px;
+     background: #fff9e9;
+     color: #76530b;
+     font-size: 13px;
+   }
+
+   @media (max-width: 650px) {
+     .history-heading { align-items: flex-start; }
+     .history-heading button { padding: 10px 12px; }
+   }
+
+   #results[hidden], [hidden] { display: none !important; }
+
+    .results-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 30px 0 14px;
+    }
+
+    .results-heading h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .read-only {
+      color: var(--green);
+      background: #eaf7ef;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .result-card {
+      min-width: 0;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .result-card.wide { grid-column: 1 / -1; }
+
+    .card-label {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.1px;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .detail {
+      margin: 8px 0 0;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .status-pill {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 5px 9px;
+      border-radius: 7px;
+      background: #f0f3f8;
+      color: #34445d;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .status-pill.success {
+      background: #eaf7ef;
+      color: var(--green);
+    }
+
+    .status-pill.warning {
+      background: #fff4d6;
+      color: var(--amber);
+    }
+
+    .explanation-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .explanation-label .card-label { margin: 0; }
+
+    .next-step {
+      margin-top: 18px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #f4f7fb;
+    }
+
+    .next-step strong { display: block; margin-bottom: 4px; }
+
+    footer {
+      padding: 0 0 28px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 650px) {
+      .topbar { padding: 15px 0; }
+      .topbar-inner, main, footer { width: calc(100% - 28px); }
+      main { padding-top: 28px; }
+      .form-row { align-items: stretch; flex-direction: column; }
+      .form-row button { width: 100%; }
+      .panel, .result-card { padding: 18px; }
+      .result-grid { grid-template-columns: 1fr; }
+      .result-card.wide { grid-column: auto; }
+      .results-heading { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">P</div>
+        <span>PayPilot AI</span>
+      </div>
+      <span class="topbar-actions">
+        <span class="sandbox">SANDBOX MODE</span>
+        <button type="button" id="logout-button" class="link-button">Sign out</button>
+      </span>
+    </div>
+  </header>
+
+  <main>
+    <div class="eyebrow">Payment operations copilot</div>
+    <h1>Investigate a payment.</h1>
+    <p class="intro">
+      Understand what PayPal's order evidence establishes, what remains
+      unverified, and what to check next.
+    </p>
+
+    <section class="notice" aria-label="Safety notice">
+      <div aria-hidden="true">ⓘ</div>
+      <div>
+        <strong>Read-only investigation</strong>
+        <p>
+          PayPal is the source of truth. This tool retrieves Sandbox order
+          evidence and explains it; it does not capture, refund, or move money.
+          An order's completed status alone does not verify settlement.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="lookup-title">
+      <h2 id="lookup-title">Start an investigation</h2>
+      <p class="subtext">
+        Enter a PayPal Sandbox order ID. Use test data only.
+      </p>
+
+      <form id="investigation-form">
+        <div class="form-row">
+          <div class="field">
+            <label for="order-id">PayPal order ID</label>
+            <input
+              id="order-id"
+              name="order_id"
+              type="text"
+              maxlength="128"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. SANDBOX-ORDER-123"
+              required
+            >
+          </div>
+          <button id="investigate-button" type="submit">
+            Investigate order
+          </button>
+        </div>
+      </form>
+      <p id="message" class="message info" role="status" aria-live="polite">
+        Ready when you are. No payment changes will be made.
+      </p>
+    </section>
+
+    <section id="results" hidden aria-labelledby="results-title">
+      <div class="results-heading">
+        <h2 id="results-title">Investigation results</h2>
+        <span class="read-only">READ ONLY</span>
+      </div>
+
+      <div class="result-grid">
+        <article class="result-card">
+          <div class="card-label">PayPal evidence</div>
+          <p id="evidence-id" class="value">—</p>
+          <p class="detail">Order ID</p>
+          <div id="evidence-status" class="status-pill">—</div>
+        </article>
+
+        <article class="result-card">
+          <div class="card-label">Capture assessment</div>
+          <p id="capture-classification" class="value">—</p>
+          <p id="capture-summary" class="detail"></p>
+          <div id="capture-settlement-status" class="status-pill warning">
+            Capture evidence does not verify settlement
+          </div>
+        </article>
+
+        <article class="result-card">
+          <div class="card-label">Deterministic assessment</div>
+          <p id="classification" class="value">—</p>
+          <p id="assessment-summary" class="detail"></p>
+          <div id="settlement-status" class="status-pill warning">
+            Settlement not verified
+          </div>
+        </article>
+
+        <article class="result-card wide">
+          <div class="explanation-label">
+            <div class="card-label">AI-assisted explanation</div>
+            <span id="explanation-status" class="status-pill">—</span>
+          </div>
+          <p id="explanation-text" class="detail"></p>
+          <div class="next-step">
+            <strong>Suggested next step</strong>
+            <p id="next-step" class="detail"></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="panel" id="reconciliation-panel" aria-labelledby="reconciliation-title">
+     <h2 id="reconciliation-title">Merchant reconciliation</h2>
+     <p class="subtext">
+       Compare a merchant CSV against PayPal Sandbox order evidence.
+       Maximum 1 MB and 1,000 records.
+     </p>
+
+     <div class="history-warning">
+       A matching order amount and currency do not prove payment settlement.
+       This tool performs read-only lookups and does not move money.
+     </div>
+
+     <form id="reconciliation-form">
+       <div class="field">
+         <label for="reconciliation-file">Merchant CSV file</label>
+         <input
+           id="reconciliation-file"
+           name="reconciliation_file"
+           type="file"
+           accept=".csv,text/csv"
+           required
+         >
+       </div>
+       <p class="subtext">
+         Required columns: merchant_reference, paypal_order_id,
+         expected_amount, currency_code
+       </p>
+       <button id="reconciliation-button" type="submit">
+         Run reconciliation
+       </button>
+     </form>
+
+     <p id="reconciliation-message" class="message info"
+        role="status" aria-live="polite">
+       Select a CSV file to begin.
+     </p>
+
+     <section id="reconciliation-results" hidden
+              aria-labelledby="reconciliation-results-title">
+       <h3 id="reconciliation-results-title">Reconciliation results</h3>
+       <p id="reconciliation-counts" class="subtext"></p>
+       <div id="reconciliation-result-list" class="history-list"></div>
+     </section>
+   </section>
+     <section class="panel" id="saved-reconciliation-runs"
+           aria-labelledby="saved-runs-title">
+    <div class="history-heading">
+      <div>
+        <h2 id="saved-runs-title">Saved reconciliation runs</h2>
+        <p class="subtext">Review saved results without contacting PayPal.</p>
+      </div>
+      <button id="refresh-saved-runs" type="button">Refresh saved runs</button>
+    </div>
+    <p class="history-warning">
+      Saved comparisons are historical evidence only. Settlement has not been verified.
+    </p>
+    <p id="saved-runs-message" class="message info" role="status" aria-live="polite">
+      Select Refresh saved runs to load saved reconciliation runs.
+    </p>
+    <div id="saved-runs-list" class="history-list"></div>
+  </section>
+
+
+  <section class="panel" id="reconciliation-analytics"
+           aria-labelledby="analytics-title">
+    <div class="history-heading">
+      <div>
+        <h2 id="analytics-title">Reconciliation analytics</h2>
+        <p class="subtext">
+          Read-only metrics calculated from saved reconciliation history.
+        </p>
+      </div>
+      <button id="refresh-analytics" type="button">Refresh analytics</button>
+    </div>
+
+    <p class="history-warning">
+      These metrics describe reconciliation records, not confirmed payments.
+      Settlement is not verified by this dashboard.
+    </p>
+
+    <p id="analytics-message" class="message info"
+       role="status" aria-live="polite">
+      Select Refresh analytics to load saved-history metrics.
+    </p>
+
+    <div id="analytics-metrics" class="analytics-grid"
+         aria-label="Reconciliation summary metrics"></div>
+
+    <h3>Daily trends</h3>
+    <p class="subtext">Up to 30 most recent days containing saved runs.</p>
+    <div id="analytics-trends" class="history-list"></div>
+  </section>
+
+<section
+     class="panel"
+     id="investigation-history"
+      aria-labelledby="history-title"
+    >
+      <div class="history-heading">
+        <div>
+          <h2 id="history-title">Recent investigations</h2>
+          <p class="subtext">Previously saved investigation records, newest first.</p>
+        </div>
+        <button id="refresh-history" type="button">Refresh history</button>
+      </div>
+
+      <p class="history-warning">
+        This history records investigation results; it is not proof of payment.
+        An order's completed status does not verify settlement.
+      </p>
+
+      <p
+        id="history-message"
+        class="message info"
+        role="status"
+        aria-live="polite"
+      >Loading investigation history…</p>
+      <div id="history-list" class="history-list"></div>
+    </section>
+  </main>
+
+  <footer>
+    PayPilot AI · PayPal Sandbox · Financial state is determined by
+    validated evidence, not AI-generated text.
+  </footer>
+
+  <script>
+    const form = document.getElementById("investigation-form");
+    const orderInput = document.getElementById("order-id");
+    const button = document.getElementById("investigate-button");
+    const message = document.getElementById("message");
+    const results = document.getElementById("results");
+
+    // Send the user to the login page when the session is missing or expired.
+    async function apiFetch(...args) {
+      const response = await fetch(...args);
+      if (response && response.status === 401 && typeof window !== "undefined") {
+        window.location.assign("/login");
+      }
+      return response;
+    }
+
+    function csrfToken() {
+      const meta = typeof document.querySelector === "function"
+        ? document.querySelector('meta[name="csrf-token"]')
+        : null;
+      return meta ? meta.getAttribute("content") : "";
+    }
+
+    document.getElementById("logout-button").addEventListener(
+      "click",
+      async () => {
+        try {
+          await fetch("/api/auth/logout", {
+            method: "POST",
+            headers: { "X-CSRF-Token": csrfToken() }
+          });
+        } finally {
+          window.location.assign("/login");
+        }
+      }
+    );
+
+    function setText(id, value) {
+      document.getElementById(id).textContent =
+        value == null || value === "" ? "Not available" : String(value);
+    }
+
+    function setMessage(text, type = "info") {
+      message.textContent = text;
+      message.className = `message ${type}`;
+    }
+
+    function setPill(id, text, type = "") {
+      const element = document.getElementById(id);
+      element.textContent = text;
+      element.className = `status-pill ${type}`.trim();
+    }
+
+    const historyList = document.getElementById("history-list");
+  const historyMessage = document.getElementById("history-message");
+  const refreshHistoryButton = document.getElementById("refresh-history");
+
+  function addHistoryDetail(container, label, value) {
+    const paragraph = document.createElement("p");
+    const labelElement = document.createElement("span");
+    labelElement.className = "history-label";
+    labelElement.textContent = `${label}: `;
+    paragraph.append(labelElement, document.createTextNode(
+      value == null || value === "" ? "Not available" : String(value)
+    ));
+    container.appendChild(paragraph);
+  }
+
+  async function loadInvestigationHistory() {
+    refreshHistoryButton.disabled = true;
+    historyMessage.className = "message info";
+    historyMessage.textContent = "Loading investigation history…";
+
+    try {
+      const response = await apiFetch("/api/investigations?limit=50", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The history response could not be read.");
+      }
+
+      if (!response.ok || !Array.isArray(data.investigations)) {
+        throw new Error("Investigation history is temporarily unavailable.");
+      }
+
+      historyList.replaceChildren();
+
+      if (data.investigations.length === 0) {
+        historyMessage.textContent =
+          "No saved investigations yet. Investigate a Sandbox order to begin.";
+        return;
+      }
+
+      for (const item of data.investigations) {
+        const article = document.createElement("article");
+        article.className = "history-item";
+
+        const heading = document.createElement("h3");
+        heading.textContent = item.order_id == null
+          ? "Order ID not available"
+          : String(item.order_id);
+        article.appendChild(heading);
+
+        addHistoryDetail(article, "Observed status", item.observed_status);
+
+        const classification = item.classification == null
+          ? "Not available"
+          : String(item.classification).replaceAll("_", " ");
+        addHistoryDetail(article, "Assessment", classification);
+
+        let timestamp = "Not available";
+        if (typeof item.investigated_at === "string" && item.investigated_at) {
+          const parsedDate = new Date(item.investigated_at);
+          if (!Number.isNaN(parsedDate.getTime())) {
+            timestamp = parsedDate.toLocaleString();
+          }
+        }
+        addHistoryDetail(article, "Investigated", timestamp);
+
+        historyList.appendChild(article);
+      }
+
+      historyMessage.textContent =
+        `Showing ${data.investigations.length} saved investigation(s).`;
+    } catch {
+      historyList.replaceChildren();
+      historyMessage.className = "message error";
+      historyMessage.textContent =
+        "Could not load investigation history. Use Refresh history to try again.";
+    } finally {
+      refreshHistoryButton.disabled = false;
+    }
+  }
+
+
+  const reconciliationForm = document.getElementById("reconciliation-form");
+  const reconciliationFile = document.getElementById("reconciliation-file");
+  const reconciliationButton = document.getElementById("reconciliation-button");
+  const reconciliationMessage = document.getElementById("reconciliation-message");
+  const reconciliationResults = document.getElementById("reconciliation-results");
+  const reconciliationCounts = document.getElementById("reconciliation-counts");
+  const reconciliationList = document.getElementById("reconciliation-result-list");
+
+  const reconciliationStatuses = [
+    "matched",
+    "amount_mismatch",
+    "currency_mismatch",
+    "needs_review",
+    "order_not_found",
+    "lookup_error"
+  ];
+
+  const recognizedRiskSignals = [
+    "duplicate_in_file",
+    "historical_identifier_match"
+  ];
+
+  function validRiskSignals(signals) {
+    return Array.isArray(signals) && signals.every((signal) =>
+      typeof signal === "string" &&
+      recognizedRiskSignals.includes(signal)
+    );
+  }
+
+  function validHistoricalMatches(matches) {
+    return Array.isArray(matches) && matches.every((match) =>
+      match &&
+      typeof match === "object" &&
+      !Array.isArray(match) &&
+      ["merchant_reference", "paypal_order_id"].includes(match.match_type) &&
+      Number.isSafeInteger(match.run_id) &&
+      match.run_id > 0 &&
+      Number.isSafeInteger(match.row_number) &&
+      match.row_number > 0 &&
+      typeof match.matched_value === "string" &&
+      match.matched_value.trim().length > 0
+    );
+  }
+
+  function setReconciliationMessage(text, type = "info") {
+    reconciliationMessage.textContent = text;
+    reconciliationMessage.className = `message ${type}`;
+  }
+
+  function renderReconciliationResult(item) {
+    const article = document.createElement("article");
+    article.className = "history-item";
+
+    const heading = document.createElement("h3");
+    heading.textContent = String(item.merchant_reference);
+    article.appendChild(heading);
+
+    const status = document.createElement("p");
+    status.className = "status-pill warning";
+    status.textContent = item.status.replaceAll("_", " ");
+    article.appendChild(status);
+
+    addHistoryDetail(article, "PayPal order ID", item.paypal_order_id);
+    addHistoryDetail(article, "Expected amount", item.expected_amount);
+    addHistoryDetail(article, "Expected currency", item.expected_currency);
+    addHistoryDetail(article, "Observed amount", item.observed_amount);
+    addHistoryDetail(article, "Observed currency", item.observed_currency);
+    addHistoryDetail(article, "Result", item.summary);
+    addHistoryDetail(article, "Settlement verified", "No");
+
+    if (Array.isArray(item.risk_signals) && item.risk_signals.length > 0) {
+      addHistoryDetail(
+        article,
+        "Risk signals",
+        item.risk_signals.map((signal) => signal.replaceAll("_", " ")).join(", ")
+      );
+      addHistoryDetail(
+        article,
+        "Informational check",
+        "Risk signals are informational and do not independently establish fraud or change reconciliation status."
+      );
+    }
+
+    if (Array.isArray(item.historical_matches)) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Historical matches";
+      article.appendChild(heading);
+
+      if (item.historical_matches.length === 0) {
+        addHistoryDetail(
+          article,
+          "Informational check",
+          "No previous saved rows matched these identifiers."
+        );
+      } else {
+        addHistoryDetail(
+          article,
+          "Notice",
+          "These matches are informational and do not change the reconciliation result."
+        );
+
+        for (const match of item.historical_matches) {
+          addHistoryDetail(
+            article,
+            `Previous ${match.match_type.replaceAll("_", " ")} match`,
+            `Run ${match.run_id}, row ${match.row_number}: ${match.matched_value}`
+          );
+        }
+      }
+    }
+
+    return article;
+  }
+
+
+  const refreshSavedRunsButton = document.getElementById("refresh-saved-runs");
+  const savedRunsMessage = document.getElementById("saved-runs-message");
+  const savedRunsList = document.getElementById("saved-runs-list");
+
+  function setSavedRunsMessage(text, type = "info") {
+    savedRunsMessage.textContent = text;
+    savedRunsMessage.className = `message ${type}`;
+  }
+
+  function validSavedRunSummary(run) {
+    return Boolean(
+      run &&
+      typeof run === "object" &&
+      Number.isSafeInteger(run.run_id) &&
+      run.run_id > 0 &&
+      typeof run.created_at === "string" &&
+      Number.isSafeInteger(run.record_count) &&
+      run.record_count >= 0 &&
+      run.counts &&
+      typeof run.counts === "object" &&
+      !Array.isArray(run.counts) &&
+      run.settlement_verified === false
+    );
+  }
+
+  function validSavedRunDetail(run) {
+    return Boolean(
+      validSavedRunSummary(run) &&
+      Array.isArray(run.results) &&
+      run.results.length === run.record_count &&
+      run.results.every((item) =>
+        item &&
+        typeof item === "object" &&
+        typeof item.merchant_reference === "string" &&
+        typeof item.paypal_order_id === "string" &&
+        reconciliationStatuses.includes(item.status) &&
+        item.settlement_verified === false
+      )
+    );
+  }
+
+  async function viewSavedRun(runId) {
+    setSavedRunsMessage(`Loading saved run ${runId}…`);
+
+    try {
+      const response = await apiFetch(`/api/reconciliation/runs/${runId}`, {
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "That saved reconciliation run was not found."
+            : "Saved reconciliation results are temporarily unavailable."
+        );
+      }
+
+      if (!validSavedRunDetail(data)) {
+        throw new Error("The server returned invalid saved reconciliation results.");
+      }
+
+      const counts = Object.fromEntries(
+        reconciliationStatuses.map((status) => [status, 0])
+      );
+
+      reconciliationList.replaceChildren();
+      for (const item of data.results) {
+        counts[item.status] += 1;
+        reconciliationList.appendChild(renderReconciliationResult(item));
+      }
+
+      reconciliationCounts.textContent = [
+        `Saved run: ${data.run_id}`,
+        `Created: ${data.created_at}`,
+        `Total records: ${data.results.length}`,
+        ...reconciliationStatuses.map(
+          (status) => `${status.replaceAll("_", " ")}: ${counts[status]}`
+        ),
+        "Settlement verified: No"
+      ].join(" · ");
+
+      reconciliationResults.hidden = false;
+      reconciliationResults.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+      setReconciliationMessage(
+        `Loaded saved run ${data.run_id}. Settlement has not been verified.`
+      );
+      setSavedRunsMessage(`Loaded saved run ${data.run_id}.`);
+    } catch (error) {
+      setSavedRunsMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved reconciliation results are temporarily unavailable.",
+        "error"
+      );
+    }
+  }
+
+  async function loadSavedRuns() {
+    refreshSavedRunsButton.disabled = true;
+    savedRunsList.replaceChildren();
+    setSavedRunsMessage("Loading saved reconciliation runs…");
+
+    try {
+      const response = await apiFetch("/api/reconciliation/runs?limit=50", {
+        headers: { "Accept": "application/json" }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        throw new Error("Saved reconciliation history is temporarily unavailable.");
+      }
+
+      if (
+        !data ||
+        !Array.isArray(data.runs) ||
+        data.count !== data.runs.length ||
+        !data.runs.every(validSavedRunSummary)
+      ) {
+        throw new Error("The server returned invalid saved reconciliation history.");
+      }
+
+      if (data.runs.length === 0) {
+        setSavedRunsMessage("No saved reconciliation runs yet.");
+        return;
+      }
+
+      for (const run of data.runs) {
+        const article = document.createElement("article");
+        article.className = "history-item";
+
+        const heading = document.createElement("h3");
+        heading.textContent = `Run ${run.run_id}`;
+        article.appendChild(heading);
+
+        addHistoryDetail(article, "Created", run.created_at);
+        addHistoryDetail(article, "Records", run.record_count);
+        addHistoryDetail(article, "Settlement verified", "No");
+
+        const viewButton = document.createElement("button");
+        viewButton.type = "button";
+        viewButton.textContent = "View results";
+        viewButton.addEventListener("click", () => viewSavedRun(run.run_id));
+        article.appendChild(viewButton);
+
+        savedRunsList.appendChild(article);
+      }
+
+      setSavedRunsMessage(`Showing ${data.runs.length} saved run(s).`);
+    } catch (error) {
+      savedRunsList.replaceChildren();
+      setSavedRunsMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved reconciliation history is temporarily unavailable.",
+        "error"
+      );
+    } finally {
+      refreshSavedRunsButton.disabled = false;
+    }
+  }
+
+  refreshSavedRunsButton.addEventListener("click", loadSavedRuns);
+
+
+  const refreshAnalyticsButton = document.getElementById("refresh-analytics");
+  const analyticsMessage = document.getElementById("analytics-message");
+  const analyticsMetrics = document.getElementById("analytics-metrics");
+  const analyticsTrends = document.getElementById("analytics-trends");
+
+  function analyticsNumber(value) {
+    return typeof value === "number" &&
+      Number.isFinite(value) && value >= 0;
+  }
+
+  function validAnalyticsSummary(data) {
+    return Boolean(
+      data &&
+      typeof data === "object" &&
+      analyticsNumber(data.total_runs) &&
+      analyticsNumber(data.total_rows) &&
+      analyticsNumber(data.recorded_rows) &&
+      typeof data.record_count_consistent === "boolean" &&
+      data.status_counts &&
+      typeof data.status_counts === "object" &&
+      !Array.isArray(data.status_counts) &&
+      analyticsNumber(data.matched_rows) &&
+      analyticsNumber(data.exception_rows) &&
+      analyticsNumber(data.match_rate_percent) &&
+      data.match_rate_percent <= 100 &&
+      typeof data.settlement_verified === "boolean" &&
+      data.settlement_verified === false &&
+      typeof data.risk_signal_history_available === "boolean" &&
+      (data.latest_run_at === null || typeof data.latest_run_at === "string")
+    );
+  }
+
+  function validAnalyticsTrends(data) {
+    return Boolean(
+      data &&
+      typeof data === "object" &&
+      Array.isArray(data.days) &&
+      data.count === data.days.length &&
+      data.settlement_verified === false &&
+      data.days.every((day) =>
+        day &&
+        typeof day.day === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(day.day) &&
+        analyticsNumber(day.total_runs) &&
+        analyticsNumber(day.total_rows) &&
+        analyticsNumber(day.matched_rows) &&
+        analyticsNumber(day.exception_rows) &&
+        analyticsNumber(day.needs_review_rows) &&
+        analyticsNumber(day.amount_mismatch_rows) &&
+        analyticsNumber(day.currency_mismatch_rows) &&
+        analyticsNumber(day.lookup_failure_rows)
+      )
+    );
+  }
+
+  function addAnalyticsMetric(label, value) {
+    const card = document.createElement("article");
+    card.className = "analytics-card";
+
+    const heading = document.createElement("p");
+    heading.textContent = label;
+
+    const number = document.createElement("strong");
+    number.textContent = String(value);
+
+    card.append(heading, number);
+    analyticsMetrics.appendChild(card);
+  }
+
+  async function loadAnalytics() {
+    refreshAnalyticsButton.disabled = true;
+    analyticsMessage.className = "message info";
+    analyticsMessage.textContent = "Loading saved reconciliation analytics…";
+
+    try {
+      const summaryResponse = await apiFetch("/api/analytics/summary", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let summary;
+      try {
+        summary = await summaryResponse.json();
+      } catch {
+        throw new Error("The analytics summary response could not be read.");
+      }
+
+      if (!summaryResponse.ok || !validAnalyticsSummary(summary)) {
+        throw new Error("The analytics summary is unavailable or invalid.");
+      }
+
+      const trendsResponse = await apiFetch("/api/analytics/trends?limit=30", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+
+      let trends;
+      try {
+        trends = await trendsResponse.json();
+      } catch {
+        throw new Error("The analytics trends response could not be read.");
+      }
+
+      if (!trendsResponse.ok || !validAnalyticsTrends(trends)) {
+        throw new Error("The analytics trends are unavailable or invalid.");
+      }
+
+      analyticsMetrics.replaceChildren();
+      analyticsTrends.replaceChildren();
+
+      addAnalyticsMetric("Saved runs", summary.total_runs);
+      addAnalyticsMetric("Records reviewed", summary.total_rows);
+      addAnalyticsMetric("Exception records", summary.exception_rows);
+      addAnalyticsMetric("Match rate", `${summary.match_rate_percent}%`);
+      addAnalyticsMetric(
+        "Record counts consistent",
+        summary.record_count_consistent ? "Yes" : "No"
+      );
+      addAnalyticsMetric(
+        "Risk-signal history",
+        summary.risk_signal_history_available ? "Available" : "Not recorded"
+      );
+
+      if (trends.days.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "history-item";
+        empty.textContent = "No daily trends are available until a reconciliation run is saved.";
+        analyticsTrends.appendChild(empty);
+      } else {
+        const maximumRows = Math.max(
+          1,
+          ...trends.days.map((day) => day.total_rows)
+        );
+
+        for (const day of trends.days) {
+          const article = document.createElement("article");
+          article.className = "history-item trend-row";
+
+          const heading = document.createElement("h3");
+          heading.textContent = day.day;
+          article.appendChild(heading);
+
+          addHistoryDetail(article, "Runs", day.total_runs);
+          addHistoryDetail(article, "Records", day.total_rows);
+          addHistoryDetail(article, "Matched", day.matched_rows);
+          addHistoryDetail(article, "Exceptions", day.exception_rows);
+          addHistoryDetail(article, "Needs review", day.needs_review_rows);
+          addHistoryDetail(article, "Amount mismatches", day.amount_mismatch_rows);
+          addHistoryDetail(article, "Currency mismatches", day.currency_mismatch_rows);
+          addHistoryDetail(article, "Lookup failures", day.lookup_failure_rows);
+
+          const track = document.createElement("div");
+          track.className = "trend-bar-track";
+          track.setAttribute("aria-label", "Daily record volume");
+
+          const bar = document.createElement("div");
+          bar.className = "trend-bar";
+          bar.style.width = `${Math.min(100, day.total_rows / maximumRows * 100)}%`;
+          track.appendChild(bar);
+          article.appendChild(track);
+
+          analyticsTrends.appendChild(article);
+        }
+      }
+
+      analyticsMessage.className = "message info";
+      analyticsMessage.textContent =
+        `Analytics loaded. ${trends.count} daily trend bucket(s). ` +
+        "Settlement verified: No.";
+    } catch (error) {
+      analyticsMetrics.replaceChildren();
+      analyticsTrends.replaceChildren();
+      analyticsMessage.className = "message error";
+      analyticsMessage.textContent = error instanceof Error
+        ? error.message
+        : "Analytics are temporarily unavailable.";
+    } finally {
+      refreshAnalyticsButton.disabled = false;
+    }
+  }
+
+  refreshAnalyticsButton.addEventListener("click", loadAnalytics);
+
+  reconciliationForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const file = reconciliationFile.files && reconciliationFile.files[0];
+
+    if (!file) {
+      setReconciliationMessage("Choose a CSV file before starting.", "error");
+      reconciliationFile.focus();
+      return;
+    }
+
+    if (file.size > 1_000_000) {
+      setReconciliationMessage("The CSV exceeds the 1 MB size limit.", "error");
+      return;
+    }
+
+    reconciliationButton.disabled = true;
+    reconciliationButton.textContent = "Reconciling…";
+    reconciliationResults.hidden = true;
+    reconciliationList.replaceChildren();
+    reconciliationCounts.textContent = "";
+    setReconciliationMessage("Reading the CSV and checking PayPal Sandbox orders…");
+
+    try {
+      const csvText = await file.text();
+
+      const response = await apiFetch("/api/reconciliation", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken()
+        },
+        body: JSON.stringify({ csv_text: csvText })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an unreadable response.");
+      }
+
+      if (!response.ok) {
+        const safeMessages = {
+          400: "The request was invalid. Check the file and try again.",
+          403: "Your session security token expired. Reload the page and try again.",
+          413: "The CSV exceeds the 1 MB size limit.",
+          422: "The CSV format or its records are invalid. Check the required columns and values.",
+          502: "PayPal could not complete one or more lookups. Try again later.",
+          504: "A PayPal lookup timed out. Try again later."
+        };
+        throw new Error(
+          safeMessages[response.status] ||
+          "Reconciliation could not be completed."
+        );
+      }
+
+      if (
+        !data ||
+        !Array.isArray(data.results) ||
+        data.count !== data.results.length ||
+        !data.counts ||
+        typeof data.counts !== "object" ||
+        Array.isArray(data.counts) ||
+        data.settlement_verified !== false
+      ) {
+        throw new Error("The server returned an invalid reconciliation response.");
+      }
+
+      for (const item of data.results) {
+        if (
+          !item ||
+          typeof item !== "object" ||
+          typeof item.merchant_reference !== "string" ||
+          typeof item.paypal_order_id !== "string" ||
+          !reconciliationStatuses.includes(item.status) ||
+          item.settlement_verified !== false ||
+          (item.risk_signals !== undefined &&
+            !validRiskSignals(item.risk_signals)) ||
+          (item.historical_matches !== undefined &&
+            !validHistoricalMatches(item.historical_matches))
+        ) {
+          throw new Error("The server returned an invalid reconciliation record.");
+        }
+      }
+
+      const counts = Object.fromEntries(
+        reconciliationStatuses.map((status) => [status, 0])
+      );
+
+      for (const item of data.results) {
+        counts[item.status] += 1;
+        reconciliationList.appendChild(renderReconciliationResult(item));
+      }
+
+      reconciliationCounts.textContent = [
+        `Total records: ${data.results.length}`,
+        ...reconciliationStatuses.map(
+          (status) => `${status.replaceAll("_", " ")}: ${counts[status]}`
+        ),
+        "Settlement verified: No"
+      ].join(" · ");
+
+      reconciliationResults.hidden = false;
+      setReconciliationMessage(
+        `Reconciliation complete. Reviewed ${data.results.length} record(s). Settlement has not been verified.`,
+        "info"
+      );
+    } catch (error) {
+      reconciliationResults.hidden = true;
+      reconciliationList.replaceChildren();
+      reconciliationCounts.textContent = "";
+      setReconciliationMessage(
+        error instanceof Error
+          ? error.message
+          : "Reconciliation could not be completed.",
+        "error"
+      );
+    } finally {
+      reconciliationButton.disabled = false;
+      reconciliationButton.textContent = "Run reconciliation";
+    }
+  });
+
+  refreshHistoryButton.addEventListener("click", loadInvestigationHistory);
+
+  form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const orderId = orderInput.value.trim();
+
+      if (!orderId) {
+        setMessage("Enter a PayPal Sandbox order ID.", "error");
+        orderInput.focus();
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Investigating…";
+      results.hidden = true;
+      setMessage("Retrieving order evidence and preparing the assessment…");
+
+      try {
+        const response = await apiFetch(
+          `/api/paypal/orders/${encodeURIComponent(orderId)}/investigation`,
+          {
+            method: "GET",
+            headers: { "Accept": "application/json" }
+          }
+        );
+
+        let data;
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error("The server returned an unreadable response.");
+        }
+
+        if (!response.ok) {
+          const safeMessages = {
+            404: "That order was not found in the configured PayPal Sandbox.",
+            422: "The order ID is invalid. Check it and try again.",
+            502: "PayPal could not complete the lookup. Try again later.",
+            504: "The PayPal lookup timed out. Try again later."
+          };
+          throw new Error(
+            safeMessages[response.status] ||
+            "The investigation could not be completed."
+          );
+        }
+
+        const evidence = data.evidence || {};
+        const assessment = data.assessment || {};
+       const capture = data.capture_assessment || {};
+        const explanation = data.explanation || {};
+
+        setText("evidence-id", evidence.id);
+        setText("evidence-status", evidence.status || "Unknown");
+
+        setText("classification", assessment.classification);
+        setText("assessment-summary", assessment.summary);
+       setText("capture-classification", capture.classification);
+       setText("capture-summary", capture.summary);
+       setPill(
+         "capture-settlement-status",
+         "Capture evidence does not verify settlement",
+         "warning"
+       );
+
+        if (assessment.settlement_verified === true) {
+          setPill("settlement-status", "Settlement verified", "success");
+        } else {
+          setPill(
+            "settlement-status",
+            "Settlement not verified by this evidence",
+            "warning"
+          );
+        }
+
+        if (explanation.status === "generated") {
+          const providerLabels = {
+            gemini: "Gemini",
+            openrouter: "OpenRouter",
+          };
+          const providerLabel = providerLabels[explanation.provider] || "AI";
+          setPill(
+            "explanation-status",
+            `${providerLabel} · AI commentary — review for accuracy`,
+            ""
+          );
+        } else {
+          setPill("explanation-status", "Deterministic fallback", "warning");
+        }
+
+        setText("explanation-text", explanation.explanation);
+        setText("next-step", assessment.next_step);
+
+        results.hidden = false;
+      await loadInvestigationHistory();
+        setMessage(
+          explanation.status === "generated"
+            ? "Investigation complete. Review the evidence and assessment below."
+            : "Investigation complete. AI was unavailable, so the deterministic fallback is shown.",
+          "info"
+        );
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred. Please try again.",
+          "error"
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = "Investigate order";
+      }
+    });
+  loadInvestigationHistory();
+  </script>
+</body>
+</html>
