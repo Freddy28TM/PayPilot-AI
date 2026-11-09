@@ -20,6 +20,47 @@ This is a development prototype. Testing uses synthetic fixtures and PayPal
 Sandbox. It is not production-ready and does not claim verified customer
 demand.
 
+## Demo video
+
+[Watch the 2-minute demo](https://youtu.be/r8ykCScLdS0): CSV reconciliation,
+mismatch detection, the investigation view with an AI explanation, and team
+accounts.
+
+## How PayPilot uses PayPal
+
+PayPilot integrates the PayPal Orders v2 REST API in the **Sandbox**
+environment only (live credentials are rejected at startup):
+
+| Purpose | Call |
+| --- | --- |
+| Authenticate | `POST /v1/oauth2/token` (client credentials) |
+| Read an order's amount, currency and status | `GET /v2/checkout/orders/{id}` |
+| Create a $1.00 USD test order (helper script only) | `POST /v2/checkout/orders` |
+
+The app is **read-only toward PayPal**. It never captures, refunds or
+modifies an order, and `settlement_verified` is always `false` because an
+order lookup alone cannot prove settlement.
+
+## How PayPilot uses AI
+
+Every finding is classified by deterministic code first. AI is then asked
+only to explain that finding in plain language and suggest a safe next step.
+It cannot change the verdict. The explanation providers are tried in order:
+
+1. OpenRouter (`OPENROUTER_API_KEY`, model `openrouter/free` by default)
+2. Google Gemini (`GEMINI_API_KEY`, model `gemini-2.5-flash` by default)
+3. A built-in deterministic explanation, used when no key is set or a
+   provider fails
+
+The structure of every AI response is validated before it is shown. No AI key
+is required to run the app or the tests.
+
+## Technology
+
+Python, FastAPI and Uvicorn; SQLite; vanilla HTML and JavaScript (no build
+step); PayPal Sandbox Orders v2; OpenRouter and Google Gemini; pytest, ruff,
+bandit and pip-audit for quality and security checks.
+
 ## Setup
 
 Requirements: Python and a virtual environment.
@@ -42,6 +83,40 @@ least 12 characters); afterwards you sign in with it.
 Open http://127.0.0.1:8000/health to check the API.
 PayPilot AI is restricted to PayPal Sandbox during setup. Use Sandbox
 credentials and test data only.
+
+## Try it in five minutes
+
+You need a free PayPal Developer account with a Sandbox REST app (client ID
+and secret). No AI key is required.
+
+1. Follow **Setup** above, adding the Sandbox client ID and secret to `.env`.
+2. Create a test order and note the ID it prints:
+   ```bash
+   python scripts/create_sandbox_test_order.py
+   # prints a line starting "Sandbox order ID: "
+   ```
+3. Start the app, open http://127.0.0.1:8000/ and create the owner account.
+4. Save this as `demo.csv`, replacing `ORDER_ID` with the ID from step 2
+   (the helper creates a $1.00 USD order):
+   ```csv
+   merchant_reference,paypal_order_id,expected_amount,currency_code
+   INV-1001,ORDER_ID,1.00,USD
+   INV-1002,ORDER_ID,5.00,USD
+   INV-1003,ORDER_ID,1.00,EUR
+   ```
+5. Upload it. Because rows repeat one order ID, all three are flagged as
+   duplicates needing review. For a clean result, create two more orders
+   and give each row its own ID: the 1.00 USD row matches, a changed amount
+   shows an amount mismatch, and a changed currency shows a currency mismatch.
+6. Open an investigation to see the deterministic evidence and the AI (or
+   fallback) explanation.
+
+**CSV format:** the header must be exactly
+`merchant_reference,paypal_order_id,expected_amount,currency_code`.
+Results are classified as matched, amount mismatch, currency mismatch, needs
+review (duplicates or no lookup), order not found, or lookup error.
+
+**Tests need no credentials:** `python -m pytest -q`.
 
 ## API endpoints
 
