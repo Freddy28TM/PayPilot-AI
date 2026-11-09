@@ -176,3 +176,10 @@ The frontend tests use Node.js's built-in test runner; npm is not required.
 ## License
 
 PayPilot AI is released under the [Apache License 2.0](LICENSE).
+
+## Runtime data, backup and recovery
+
+Set `PAYPILOT_DATA_DIR` to keep the database, backups, logs, exports and
+recovery copies outside the source repository. See
+[docs/DATA-LAYOUT.md](docs/DATA-LAYOUT.md) for the layout, `scripts/backup_db.py`
+and `scripts/restore_db.py`.

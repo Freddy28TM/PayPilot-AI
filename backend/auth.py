@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from backend.database import DEFAULT_DATABASE_PATH
+from backend.paths import resolve_database_path
 
 _USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{3,64}$")
 _PASSWORD_MIN_LENGTH = 12
@@ -116,8 +116,10 @@ def _dummy_password_hash() -> str:
 class AuthRepository:
     """Store user accounts, hashed sessions, and security audit events."""
 
-    def __init__(self, database_path: str | Path = DEFAULT_DATABASE_PATH):
-        self.database_path = Path(database_path)
+    def __init__(self, database_path: str | Path | None = None):
+        self.database_path = (
+            Path(database_path) if database_path else resolve_database_path()
+        )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

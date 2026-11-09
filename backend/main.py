@@ -30,6 +30,7 @@ from backend.evidence import (
     select_order_evidence,
 )
 from backend.explainer import GeminiExplainer
+from backend.paths import get_data_paths
 from backend.paypal_client import PayPalAPIError, PayPalClient
 from backend.reconciliation import MAX_CSV_BYTES, ReconciliationInputError
 from backend.reconciliation_service import reconcile_csv
@@ -39,6 +40,9 @@ from backend.reconciliation_service import reconcile_csv
 async def lifespan(app: FastAPI):
     """Create and close the shared PayPal client."""
     settings = get_settings()
+    data_paths = get_data_paths()
+    if not data_paths.legacy_layout:
+        data_paths.ensure_directories()
     client = PayPalClient(settings=settings)
     app.state.paypal_client = client
     app.state.gemini_explainer = GeminiExplainer(settings=settings)

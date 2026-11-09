@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.paths import LEGACY_DATA_DIR, resolve_database_path
+
 ALLOWED_ORDER_CLASSIFICATIONS = frozenset({
     "completed_settlement_unverified",
     "insufficient_evidence",
@@ -17,16 +19,18 @@ ALLOWED_ORDER_CLASSIFICATIONS = frozenset({
     "unknown_status_review",
 })
 
-DEFAULT_DATABASE_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "paypilot.sqlite3"
-)
+# Legacy in-repository location, kept for backward compatibility. Runtime
+# code resolves the real location with resolve_database_path().
+DEFAULT_DATABASE_PATH = LEGACY_DATA_DIR / "paypilot.sqlite3"
 
 
 class InvestigationRepository:
     """Store minimal historical snapshots of PayPal investigations."""
 
-    def __init__(self, database_path: str | Path = DEFAULT_DATABASE_PATH):
-        self.database_path = Path(database_path)
+    def __init__(self, database_path: str | Path | None = None):
+        self.database_path = (
+            Path(database_path) if database_path else resolve_database_path()
+        )
 
     def initialize(self) -> None:
         """Create the database directory and history table if needed."""
@@ -145,8 +149,10 @@ ALLOWED_RISK_SIGNALS = frozenset({
 class ReconciliationRepository:
     """Persist minimal, immutable snapshots of reconciliation runs."""
 
-    def __init__(self, database_path: str | Path = DEFAULT_DATABASE_PATH):
-        self.database_path = Path(database_path)
+    def __init__(self, database_path: str | Path | None = None):
+        self.database_path = (
+            Path(database_path) if database_path else resolve_database_path()
+        )
 
     def initialize(self) -> None:
         """Create reconciliation history tables when needed."""

@@ -1,5 +1,7 @@
 """Validated application settings; never print secret values."""
 
+from pathlib import Path
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +18,8 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr | None = None
     openrouter_model: str = "openrouter/free"
+
+    paypilot_data_dir: Path | None = None
 
     paypal_environment: str = "sandbox"
     paypal_client_id: SecretStr | None = None
