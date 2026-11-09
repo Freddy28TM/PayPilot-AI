@@ -67,3 +67,15 @@ database aside, then move the restored file into
 - Backups are not encrypted. They contain password hashes and investigation
   history; protect the directory accordingly.
 - `logs/` and `exports/` are created but not yet written to by the app.
+
+## Audit actor attribution and migration
+
+`auth_audit_events` has an `actor_user_id` column recording which owner
+created, deactivated or reactivated an account. Existing databases are
+migrated automatically and safely on startup (`ALTER TABLE ... ADD COLUMN`,
+guarded by a column check, so it is idempotent and keeps every existing row).
+Events recorded before this change, self-service events such as login, and
+the first owner's creation have no actor and show `actor: null`.
+
+Before upgrading a database you care about, take a backup:
+`python scripts/backup_db.py`.

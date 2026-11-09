@@ -173,9 +173,28 @@ class AuthRepository:
                     username TEXT NOT NULL,
                     event_type TEXT NOT NULL,
                     succeeded INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
-                    occurred_at TEXT NOT NULL
+                    occurred_at TEXT NOT NULL,
+                    actor_user_id INTEGER REFERENCES auth_users(id)
                 )
             """)
+            self._migrate_audit_actor(connection)
+
+    @staticmethod
+    def _migrate_audit_actor(connection: sqlite3.Connection) -> None:
+        """Add the acting-user column to databases created before it existed.
+
+        Safe to run repeatedly. Existing rows keep a NULL actor, meaning the
+        actor was not recorded (or the event was a self-service action).
+        """
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(auth_audit_events)")
+        }
+        if "actor_user_id" not in columns:
+            connection.execute(
+                "ALTER TABLE auth_audit_events "
+                "ADD COLUMN actor_user_id INTEGER REFERENCES auth_users(id)"
+            )
 
     def create_user(
         self,
@@ -212,11 +231,12 @@ class AuthRepository:
             connection.execute(
                 """
                 INSERT INTO auth_audit_events (
-                    user_id, username, event_type, succeeded, occurred_at
+                    user_id, username, event_type, succeeded, occurred_at,
+                    actor_user_id
                 )
-                VALUES (?, ?, 'account_created', 1, ?)
+                VALUES (?, ?, 'account_created', 1, ?, ?)
                 """,
-                (user_id, normalized_username, created_at),
+                (user_id, normalized_username, created_at, created_by),
             )
             return user_id
 
@@ -446,6 +466,31 @@ class AuthRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_audit_events(self, limit: int = 100) -> list[dict]:
+        """Return recent audit events, newest first, with the acting username.
+
+        ``actor`` is None when no actor was recorded: self-service events
+        (login), the first owner's creation, and events older than actor
+        tracking.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("Limit must be an integer.")
+        limit = max(1, min(limit, 500))
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT e.id, e.event_type, e.username AS subject,
+                       e.succeeded, e.occurred_at, a.username AS actor
+                FROM auth_audit_events AS e
+                LEFT JOIN auth_users AS a ON a.id = e.actor_user_id
+                ORDER BY e.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def set_user_active(self, user_id: int, active: bool, actor_id: int) -> bool:
         """Activate or deactivate an employee account.
 
@@ -485,15 +530,17 @@ class AuthRepository:
             connection.execute(
                 """
                 INSERT INTO auth_audit_events (
-                    user_id, username, event_type, succeeded, occurred_at
+                    user_id, username, event_type, succeeded, occurred_at,
+                    actor_user_id
                 )
-                VALUES (?, ?, ?, 1, ?)
+                VALUES (?, ?, ?, 1, ?, ?)
                 """,
                 (
                     user_id,
                     username,
                     "account_reactivated" if active else "account_deactivated",
                     now,
+                    actor_id,
                 ),
             )
         return True

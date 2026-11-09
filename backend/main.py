@@ -402,6 +402,23 @@ def list_accounts(
     return {"users": users, "count": len(users)}
 
 
+@app.get("/api/auth/audit")
+def list_audit_events(
+    _owner: Annotated[dict, Depends(require_owner)],
+    auth: Annotated[AuthRepository, Depends(get_auth_repository)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, object]:
+    """List recent security audit events with the acting owner (owner only)."""
+    try:
+        events = auth.list_audit_events(limit)
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication services are temporarily unavailable.",
+        ) from exc
+    return {"events": events, "count": len(events)}
+
+
 @app.post("/api/auth/users", status_code=201)
 def create_employee_account(
     credentials: Credentials,

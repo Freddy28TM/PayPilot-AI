@@ -54,6 +54,7 @@ credentials and test data only.
 | POST | `/api/auth/setup` | Creates the first owner account (only while none exists) and signs in |
 | POST | `/api/auth/login` | Signs in with a username and password |
 | GET | `/api/auth/users` | Lists accounts (owner only) |
+| GET | `/api/auth/audit` | Recent security audit events with the acting owner (owner only; `limit` 1–500) |
 | POST | `/api/auth/users` | Creates an employee account (owner only, CSRF token required) |
 | POST | `/api/auth/users/{id}/deactivate` | Deactivates an employee and revokes their sessions (owner only) |
 | POST | `/api/auth/users/{id}/reactivate` | Reactivates an employee (owner only) |
